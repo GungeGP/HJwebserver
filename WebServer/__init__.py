@@ -149,6 +149,9 @@ class WebServer:
         server.static_dir = self.static_dir
         server.default_js = self.default_js
         server.auth_js = self.auth_js
+        server.package_public_dir = getattr(self, 'package_public_dir', None)
+        server.package_default_js = getattr(self, 'package_default_js', None)
+        server.package_auth_js = getattr(self, 'package_auth_js', None)
         server.can_serve_static_js = self.can_serve_static_js
         server.get_inject_js_urls = self.get_inject_js_urls
         

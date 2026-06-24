@@ -86,6 +86,33 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             else:
+                # Try serving package-bundled JS assets as a fallback
+                package_public = getattr(self.server, 'package_public_dir', None)
+                safe_name = os.path.basename(file_path)
+                if package_public and safe_name.lower() in ('webserver.js', 'default.js', 'auth.js'):
+                    package_path = os.path.join(package_public, safe_name)
+                    if os.path.exists(package_path) and os.path.isfile(package_path):
+                        # Respect JS serving policy (auth.js only when enabled)
+                        can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
+                        if not can_serve_js(safe_name):
+                            self.send_response(404)
+                            self.end_headers()
+                            self.wfile.write(b"404 - Not Found")
+                            return
+
+                        with open(package_path, 'rb') as f:
+                            content = f.read()
+
+                        content_type, _ = mimetypes.guess_type(package_path)
+                        if not content_type:
+                            content_type = "application/octet-stream"
+
+                        self.send_response(200)
+                        self.send_header("Content-Type", content_type)
+                        self.end_headers()
+                        self.wfile.write(content)
+                        return
+
                 self.send_response(404)
                 self.end_headers()
                 self.wfile.write(b"404 - Not Found")
