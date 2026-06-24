@@ -42,13 +42,18 @@ class WebServer:
                 pass
             # 3) package parent dir (works when imported as a package)
             candidates.append(self.base_dir)
+            # 4) package internal public folder (works for installed pip packages)
+            candidates.append(os.path.join(os.path.dirname(__file__), 'public'))
 
-            for base in candidates:
-                default_public_folder = os.path.join(base, 'public')
+            for candidate in candidates:
+                if candidate.endswith(os.sep + 'public') or candidate.endswith('/public'):
+                    default_public_folder = candidate
+                else:
+                    default_public_folder = os.path.join(candidate, 'public')
+
                 if os.path.exists(default_public_folder) and os.path.isdir(default_public_folder):
                     self.static_dir = default_public_folder
-                    # keep base_dir pointing to the resolved base
-                    self.base_dir = base
+                    self.base_dir = os.path.dirname(default_public_folder)
                     break
 
         if self.static_dir:
