@@ -24,7 +24,7 @@ class WebServer:
             print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory in the same location as your script.")
             self.static_dir = None
 
-    def file(self, url_path, file_path):
+    def addPath(self, url_path, file_path):
         """Maps a URL to ANY file, safely resolving the path."""
         self.routes = handle_file_request(self, url_path, file_path)
 

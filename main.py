@@ -3,7 +3,7 @@ import json
 from WebServer import WebServer
 
 app = WebServer(port=8080)
-app.file('/', 'public/index.html')
+app.addPath('/', 'public/index.html')
 
 @app.route('POST', '/api/data')
 def data_route(request):
