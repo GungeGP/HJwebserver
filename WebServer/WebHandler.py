@@ -130,6 +130,8 @@ class WebHandler(BaseHTTPRequestHandler):
 
                     if content_type == "text/html":
                         content = self._inject_html(file_path, content)
+
+                    self.send_response(200)
                     self.send_header("Content-Type", content_type)
                     self.end_headers()
                     self.wfile.write(content)
