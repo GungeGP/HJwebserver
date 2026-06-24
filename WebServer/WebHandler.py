@@ -58,6 +58,15 @@ class WebHandler(BaseHTTPRequestHandler):
             file_path = os.path.join(self.server.static_dir, safe_path)
             
             if os.path.exists(file_path) and os.path.isfile(file_path):
+                if file_path.lower().endswith('.js'):
+                    js_name = os.path.basename(file_path)
+                    can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
+                    if not can_serve_js(js_name):
+                        self.send_response(404)
+                        self.end_headers()
+                        self.wfile.write(b"404 - Not Found")
+                        return
+
                 with open(file_path, 'rb') as f:
                     content = f.read()
                 
@@ -65,10 +74,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 if not content_type:
                     content_type = "application/octet-stream"
 
-                if content_type == "text/html" and getattr(self.server, 'default_js', None):
-                    content = inject_default_js(content, self.server.default_js)
-                    # If we changed the content, the bytes length is still valid for chunked responses,
-                    # but we don't send Content-Length here, so no need to adjust headers.
+                if content_type == "text/html":
+                    inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
+                    if inject_urls:
+                        content = inject_default_js(content, inject_urls)
+                        # If we changed the content, the bytes length is still valid for chunked responses,
+                        # but we don't send Content-Length here, so no need to adjust headers.
                     
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
