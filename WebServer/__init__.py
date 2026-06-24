@@ -9,34 +9,63 @@ from WebServer.database import createConnection, get_connection
 class WebServer:
     """The clean interface your teammates will actually use."""
     
-    def __init__(self, host="127.0.0.1", port=8000):
+    def __init__(self, host="127.0.0.1", port=8000, static_dir: str = None):
         self.host = host
         self.port = port
         self.routes = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
         self.auth = None
         
-        # Resolve base directory relative to the package so static files
-        # are found whether the server is run as a script or imported.
+        # Allow callers to override where static files live. If not provided,
+        # try several sensible locations so the framework works when used
+        # either as a script or when imported as a package.
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-        default_public_folder = os.path.join(self.base_dir, 'public')
-        if os.path.exists(default_public_folder) and os.path.isdir(default_public_folder):
-            print(f"[ web_framework ] Static file serving enabled from: {default_public_folder}")
-            self.static_dir = default_public_folder
+        self.static_dir = None
+        if static_dir:
+            candidate = os.path.abspath(static_dir)
+            if os.path.exists(candidate) and os.path.isdir(candidate):
+                self.static_dir = candidate
+
+        if not self.static_dir:
+            candidates = []
+            # 1) directory of the calling script (works when run as script)
+            try:
+                caller_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+                if caller_dir:
+                    candidates.append(caller_dir)
+            except Exception:
+                pass
+            # 2) current working directory (common when running from project root)
+            try:
+                candidates.append(os.getcwd())
+            except Exception:
+                pass
+            # 3) package parent dir (works when imported as a package)
+            candidates.append(self.base_dir)
+
+            for base in candidates:
+                default_public_folder = os.path.join(base, 'public')
+                if os.path.exists(default_public_folder) and os.path.isdir(default_public_folder):
+                    self.static_dir = default_public_folder
+                    # keep base_dir pointing to the resolved base
+                    self.base_dir = base
+                    break
+
+        if self.static_dir:
+            print(f"[ web_framework ] Static file serving enabled from: {self.static_dir}")
 
             self.default_js = None
             for js_file, js_url in [('webserver.js', '/webserver.js'), ('default.js', '/default.js')]:
-                candidate_path = os.path.join(default_public_folder, js_file)
+                candidate_path = os.path.join(self.static_dir, js_file)
                 if os.path.exists(candidate_path) and os.path.isfile(candidate_path):
                     self.default_js = js_url
                     print(f"[ web_framework ] Default script injection enabled: {self.default_js}")
                     break
 
-            auth_js_path = os.path.join(default_public_folder, 'auth.js')
+            auth_js_path = os.path.join(self.static_dir, 'auth.js')
             self.auth_js = auth_js_path if os.path.exists(auth_js_path) and os.path.isfile(auth_js_path) else None
         else:
-            print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory in the same location as your script.")
-            self.static_dir = None
+            print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory next to your script or pass `static_dir` to WebServer.")
             self.default_js = None
             self.auth_js = None
 
