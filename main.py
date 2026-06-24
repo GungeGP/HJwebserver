@@ -3,7 +3,9 @@ import json
 from WebServer import WebServer
 
 app = WebServer(port=8080)
+app.setDatabase(server="localhost", dbName="workTime")
 app.addPath('/', 'public/index.html')
+app.settings(auth=True)  # Enable authentication for the server
 
 @app.route('POST', '/api/data')
 def data_route(request):
