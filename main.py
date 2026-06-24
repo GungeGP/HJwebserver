@@ -1,6 +1,6 @@
 import json
 
-from web_framework.WebServer import WebServer
+from WebServer import WebServer
 
 app = WebServer(port=8080)
 app.file('/', 'public/index.html')

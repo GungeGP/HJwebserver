@@ -2,8 +2,8 @@ from http.server import HTTPServer
 import os
 import sys
 
-from web_framework.FileHandler import handle_file_request
-from web_framework.WebHandler import WebHandler
+from WebServer.FileHandler import handle_file_request
+from WebServer.WebHandler import WebHandler
 
 class WebServer:
     """The clean interface your teammates will actually use."""
