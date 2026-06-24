@@ -12,6 +12,13 @@ FRAMEWORK_ASSETS_PREFIX = '/framework-assets/'
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
     
+    def _inject_html(self, file_path, content):
+        inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
+        if inject_urls:
+            print(f"[ web_framework ] Injecting {inject_urls} into {file_path}")
+            return inject_default_js(content, inject_urls)
+        return content
+
     def handle_request(self, method):
         parsed_url = urlparse(self.path)
         path = parsed_url.path
@@ -72,6 +79,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 if package_public:
                     package_path = os.path.join(package_public, safe)
                     if os.path.exists(package_path) and os.path.isfile(package_path):
+                        print(f"[ web_framework ] Serving package asset: {package_path}")
                         # Respect JS serving policy for package assets too
                         if package_path.lower().endswith('.js'):
                             js_name = os.path.basename(package_path)
@@ -90,9 +98,7 @@ class WebHandler(BaseHTTPRequestHandler):
                             content_type = "application/octet-stream"
 
                         if content_type == "text/html":
-                            inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
-                            if inject_urls:
-                                content = inject_default_js(content, inject_urls)
+                            content = self._inject_html(package_path, content)
 
                         self.send_response(200)
                         self.send_header("Content-Type", content_type)
@@ -123,11 +129,7 @@ class WebHandler(BaseHTTPRequestHandler):
                         content_type = "application/octet-stream"
 
                     if content_type == "text/html":
-                        inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
-                        if inject_urls:
-                            content = inject_default_js(content, inject_urls)
-
-                    self.send_response(200)
+                        content = self._inject_html(file_path, content)
                     self.send_header("Content-Type", content_type)
                     self.end_headers()
                     self.wfile.write(content)
