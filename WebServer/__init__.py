@@ -21,9 +21,12 @@ class WebServer:
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
         self.static_dir = None
+        # Where the installed package's bundled static files live
         self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
         self.package_default_js = os.path.join(self.package_public_dir, 'webserver.js')
         self.package_auth_js = os.path.join(self.package_public_dir, 'auth.js')
+        # URL prefix exposed for framework-bundled assets
+        self.framework_assets_prefix = '/framework-assets/'
         if static_dir:
             candidate = os.path.abspath(static_dir)
             if os.path.exists(candidate) and os.path.isdir(candidate):
@@ -70,14 +73,16 @@ class WebServer:
                     print(f"[ web_framework ] Default script injection enabled: {self.default_js}")
                     break
             if self.default_js is None and os.path.exists(self.package_default_js):
-                self.default_js = '/webserver.js'
+                # Expose the package-provided default script under the framework prefix
+                self.default_js = self.framework_assets_prefix + 'webserver.js'
                 print(f"[ web_framework ] Default script injection enabled from package assets: {self.default_js}")
 
+            # Determine auth.js URL: prefer project-local, otherwise expose package auth under the framework prefix
             auth_js_path = os.path.join(self.static_dir, 'auth.js')
             if os.path.exists(auth_js_path) and os.path.isfile(auth_js_path):
-                self.auth_js = auth_js_path
+                self.auth_js = '/auth.js'
             elif os.path.exists(self.package_auth_js) and os.path.isfile(self.package_auth_js):
-                self.auth_js = self.package_auth_js
+                self.auth_js = self.framework_assets_prefix + 'auth.js'
             else:
                 self.auth_js = None
         else:
@@ -110,7 +115,7 @@ class WebServer:
         if self.default_js:
             urls.append(self.default_js)
         if self.auth and self.auth_js:
-            urls.append('/auth.js')
+            urls.append(self.auth_js)
         return urls
 
     def can_serve_static_js(self, file_name):

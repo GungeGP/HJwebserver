@@ -6,6 +6,9 @@ from urllib.parse import urlparse
 
 from WebServer.FileHandler import inject_default_js
 
+# URL prefix used to expose framework-bundled static assets (package 'public/' folder)
+FRAMEWORK_ASSETS_PREFIX = '/framework-assets/'
+
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
     
@@ -52,53 +55,32 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b"500 - Internal Server Error")
                 
-        # 2. The Static Directory Fallback
-        elif method == 'GET' and getattr(self.server, 'static_dir', None):
-            safe_path = path.lstrip('/')
-            file_path = os.path.join(self.server.static_dir, safe_path)
-            
-            if os.path.exists(file_path) and os.path.isfile(file_path):
-                if file_path.lower().endswith('.js'):
-                    js_name = os.path.basename(file_path)
-                    can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
-                    if not can_serve_js(js_name):
-                        self.send_response(404)
-                        self.end_headers()
-                        self.wfile.write(b"404 - Not Found")
-                        return
+        # 2. The Static Directory Fallback (and package assets)
+        elif method == 'GET':
+            # 2a. If request targets framework-bundled assets, serve from package_public_dir
+            if path.startswith(FRAMEWORK_ASSETS_PREFIX):
+                relative = path[len(FRAMEWORK_ASSETS_PREFIX):].lstrip('/')
+                # Prevent path traversal
+                safe = os.path.normpath(relative).replace('\\', '/')
+                if safe.startswith('..'):
+                    self.send_response(404)
+                    self.end_headers()
+                    self.wfile.write(b"404 - Not Found")
+                    return
 
-                with open(file_path, 'rb') as f:
-                    content = f.read()
-                
-                content_type, _ = mimetypes.guess_type(file_path)
-                if not content_type:
-                    content_type = "application/octet-stream"
-
-                if content_type == "text/html":
-                    inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
-                    if inject_urls:
-                        content = inject_default_js(content, inject_urls)
-                        # If we changed the content, the bytes length is still valid for chunked responses,
-                        # but we don't send Content-Length here, so no need to adjust headers.
-                    
-                self.send_response(200)
-                self.send_header("Content-Type", content_type)
-                self.end_headers()
-                self.wfile.write(content)
-            else:
-                # Try serving package-bundled JS assets as a fallback
                 package_public = getattr(self.server, 'package_public_dir', None)
-                safe_name = os.path.basename(file_path)
-                if package_public and safe_name.lower() in ('webserver.js', 'default.js', 'auth.js'):
-                    package_path = os.path.join(package_public, safe_name)
+                if package_public:
+                    package_path = os.path.join(package_public, safe)
                     if os.path.exists(package_path) and os.path.isfile(package_path):
-                        # Respect JS serving policy (auth.js only when enabled)
-                        can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
-                        if not can_serve_js(safe_name):
-                            self.send_response(404)
-                            self.end_headers()
-                            self.wfile.write(b"404 - Not Found")
-                            return
+                        # Respect JS serving policy for package assets too
+                        if package_path.lower().endswith('.js'):
+                            js_name = os.path.basename(package_path)
+                            can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
+                            if not can_serve_js(js_name):
+                                self.send_response(404)
+                                self.end_headers()
+                                self.wfile.write(b"404 - Not Found")
+                                return
 
                         with open(package_path, 'rb') as f:
                             content = f.read()
@@ -107,15 +89,80 @@ class WebHandler(BaseHTTPRequestHandler):
                         if not content_type:
                             content_type = "application/octet-stream"
 
+                        if content_type == "text/html":
+                            inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
+                            if inject_urls:
+                                content = inject_default_js(content, inject_urls)
+
                         self.send_response(200)
                         self.send_header("Content-Type", content_type)
                         self.end_headers()
                         self.wfile.write(content)
                         return
 
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write(b"404 - Not Found")
+            # 2b. Fall back to the consuming project's static_dir
+            if getattr(self.server, 'static_dir', None):
+                safe_path = path.lstrip('/')
+                file_path = os.path.join(self.server.static_dir, safe_path)
+
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    if file_path.lower().endswith('.js'):
+                        js_name = os.path.basename(file_path)
+                        can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
+                        if not can_serve_js(js_name):
+                            self.send_response(404)
+                            self.end_headers()
+                            self.wfile.write(b"404 - Not Found")
+                            return
+
+                    with open(file_path, 'rb') as f:
+                        content = f.read()
+
+                    content_type, _ = mimetypes.guess_type(file_path)
+                    if not content_type:
+                        content_type = "application/octet-stream"
+
+                    if content_type == "text/html":
+                        inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
+                        if inject_urls:
+                            content = inject_default_js(content, inject_urls)
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+
+            # 2c. Try serving package-bundled JS assets as a narrow fallback (legacy behavior)
+            package_public = getattr(self.server, 'package_public_dir', None)
+            safe_name = os.path.basename(path)
+            if package_public and safe_name.lower() in ('webserver.js', 'default.js', 'auth.js'):
+                package_path = os.path.join(package_public, safe_name)
+                if os.path.exists(package_path) and os.path.isfile(package_path):
+                    # Respect JS serving policy (auth.js only when enabled)
+                    can_serve_js = getattr(self.server, 'can_serve_static_js', lambda _: True)
+                    if not can_serve_js(safe_name):
+                        self.send_response(404)
+                        self.end_headers()
+                        self.wfile.write(b"404 - Not Found")
+                        return
+
+                    with open(package_path, 'rb') as f:
+                        content = f.read()
+
+                    content_type, _ = mimetypes.guess_type(package_path)
+                    if not content_type:
+                        content_type = "application/octet-stream"
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"404 - Not Found")
                 
         # 3. Automatic 404
         else:
