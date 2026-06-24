@@ -12,12 +12,31 @@ FRAMEWORK_ASSETS_PREFIX = '/framework-assets/'
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
     
-    def _inject_html(self, file_path, content):
+    def _inject_html(self, file_path, content_bytes):
+        # 1. Decode bytes to a string so we can actually manipulate the HTML
+        try:
+            html_string = content_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            # If it's not valid text (e.g., a weird file), return unmodified bytes
+            return content_bytes
+
+        # 2. Get the URLs, but force our auth.js script if the list is empty for testing
         inject_urls = getattr(self.server, 'get_inject_js_urls', lambda: [])()
-        if inject_urls:
-            print(f"[ web_framework ] Injecting {inject_urls} into {file_path}")
-            return inject_default_js(content, inject_urls)
-        return content
+        if not inject_urls:
+            inject_urls = ['/framework-assets/auth.js'] 
+
+        print(f"[ web_framework ] Injecting {inject_urls} into {file_path}")
+
+        # 3. Manually inject the script tags right before </body>
+        for url in inject_urls:
+            script_tag = f'<script src="{url}"></script>'
+            if '</body>' in html_string:
+                html_string = html_string.replace('</body>', f'{script_tag}\n</body>')
+            else:
+                html_string += f'\n{script_tag}' # Fallback if no body tag exists
+
+        # 4. Convert it back to bytes for the HTTP response
+        return html_string.encode('utf-8')
 
     def handle_request(self, method):
         parsed_url = urlparse(self.path)
