@@ -21,9 +21,6 @@ class WebServer:
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
         self.static_dir = None
-        self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
-        self.package_default_js = os.path.join(self.package_public_dir, 'webserver.js')
-        self.package_auth_js = os.path.join(self.package_public_dir, 'auth.js')
         if static_dir:
             candidate = os.path.abspath(static_dir)
             if os.path.exists(candidate) and os.path.isdir(candidate):
@@ -69,17 +66,9 @@ class WebServer:
                     self.default_js = js_url
                     print(f"[ web_framework ] Default script injection enabled: {self.default_js}")
                     break
-            if self.default_js is None and os.path.exists(self.package_default_js):
-                self.default_js = '/webserver.js'
-                print(f"[ web_framework ] Default script injection enabled from package assets: {self.default_js}")
 
             auth_js_path = os.path.join(self.static_dir, 'auth.js')
-            if os.path.exists(auth_js_path) and os.path.isfile(auth_js_path):
-                self.auth_js = auth_js_path
-            elif os.path.exists(self.package_auth_js) and os.path.isfile(self.package_auth_js):
-                self.auth_js = self.package_auth_js
-            else:
-                self.auth_js = None
+            self.auth_js = auth_js_path if os.path.exists(auth_js_path) and os.path.isfile(auth_js_path) else None
         else:
             print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory next to your script or pass `static_dir` to WebServer.")
             self.default_js = None

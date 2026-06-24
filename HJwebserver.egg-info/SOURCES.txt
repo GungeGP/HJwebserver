@@ -1,0 +1,15 @@
+MANIFEST.in
+README.md
+setup.py
+HJwebserver.egg-info/PKG-INFO
+HJwebserver.egg-info/SOURCES.txt
+HJwebserver.egg-info/dependency_links.txt
+HJwebserver.egg-info/top_level.txt
+WebServer/FileHandler.py
+WebServer/WebHandler.py
+WebServer/__init__.py
+WebServer/auth.py
+WebServer/database.py
+WebServer/helper.py
+WebServer/public/auth.js
+WebServer/public/webserver.js
