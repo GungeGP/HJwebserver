@@ -4,6 +4,8 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
+from WebServer.FileHandler import inject_default_js
+
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
     
@@ -62,6 +64,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 content_type, _ = mimetypes.guess_type(file_path)
                 if not content_type:
                     content_type = "application/octet-stream"
+
+                if content_type == "text/html" and getattr(self.server, 'default_js', None):
+                    content = inject_default_js(content, self.server.default_js)
+                    # If we changed the content, the bytes length is still valid for chunked responses,
+                    # but we don't send Content-Length here, so no need to adjust headers.
                     
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
