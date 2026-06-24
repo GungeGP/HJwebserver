@@ -159,6 +159,8 @@ class WebServer:
         server.package_auth_js = getattr(self, 'package_auth_js', None)
         server.can_serve_static_js = self.can_serve_static_js
         server.get_inject_js_urls = self.get_inject_js_urls
+
+        print("CRITICAL DEBUG - URLs to inject:", self.get_inject_js_urls())
         
         print(f"[ web_framework ] Secure Internal Server running on http://{self.host}:{self.port}")
         print("[ web_framework ] Press Ctrl+C to stop.")
