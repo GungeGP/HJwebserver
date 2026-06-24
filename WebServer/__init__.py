@@ -15,7 +15,9 @@ class WebServer:
         self.routes = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
         self.auth = None
         
-        self.base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        # Resolve base directory relative to the package so static files
+        # are found whether the server is run as a script or imported.
+        self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
         default_public_folder = os.path.join(self.base_dir, 'public')
         if os.path.exists(default_public_folder) and os.path.isdir(default_public_folder):
