@@ -182,9 +182,11 @@ class WebServer:
     def get_inject_js_urls(self):
         urls = []
         if self.default_js:
-            urls.append('/public/webserver.js')
+            # Use canonical framework routes so injection works even when
+            # the host project's public folder does not contain framework JS.
+            urls.append('/webserver.js')
         if self.auth and self.auth_js:
-            urls.append('/public/auth.js')
+            urls.append('/auth.js')
         return urls
 
     def can_serve_static_js(self, file_name):
