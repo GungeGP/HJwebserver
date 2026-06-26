@@ -162,6 +162,18 @@ class WebServer:
             from WebServer.auth import check_auth
             return check_auth(request)
         return "Authentication is not enabled. Please use .settings(auth=True) to enable it."
+
+    def _asset_version(self, relative_file_name):
+        """Return a stable cache-busting token for the active JS asset."""
+        candidate_paths = []
+        if self.static_dir:
+            candidate_paths.append(os.path.join(self.static_dir, relative_file_name))
+        candidate_paths.append(os.path.join(self.package_public_dir, relative_file_name))
+
+        for candidate_path in candidate_paths:
+            if os.path.exists(candidate_path) and os.path.isfile(candidate_path):
+                return str(int(os.path.getmtime(candidate_path)))
+        return None
     
     def createAuth(self, username):
         """Creates a JWT token for the given username."""
@@ -173,9 +185,11 @@ class WebServer:
     def get_inject_js_urls(self):
         urls = []
         if self.default_js:
-            urls.append('/webserver.js')
+            version = self._asset_version('webserver.js') or self._asset_version('default.js')
+            urls.append(f"/webserver.js?v={version}" if version else '/webserver.js')
         if self.auth and self.auth_js:
-            urls.append('/auth.js')
+            version = self._asset_version('auth.js')
+            urls.append(f"/auth.js?v={version}" if version else '/auth.js')
         return urls
 
     def can_serve_static_js(self, file_name):
