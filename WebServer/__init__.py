@@ -182,9 +182,9 @@ class WebServer:
     def get_inject_js_urls(self):
         urls = []
         if self.default_js:
-            urls.append(self.default_js)
+            urls.append('/public/webserver.js')
         if self.auth and self.auth_js:
-            urls.append(self.auth_js)
+            urls.append('/public/auth.js')
         return urls
 
     def can_serve_static_js(self, file_name):
@@ -201,8 +201,16 @@ class WebServer:
             return func
         return decorator
 
+    def _register_asset_alias_routes(self):
+        get_routes = self.routes.setdefault('GET', {})
+        if '/auth.js' in get_routes:
+            get_routes['/public/auth.js'] = get_routes['/auth.js']
+        if '/webserver.js' in get_routes:
+            get_routes['/public/webserver.js'] = get_routes['/webserver.js']
+
     def start(self):
         """Boots the server."""
+        self._register_asset_alias_routes()
         server = HTTPServer((self.host, self.port), WebHandler)
         server.routes = self.routes 
         server.auth = self.auth
