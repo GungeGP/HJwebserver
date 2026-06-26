@@ -3,10 +3,8 @@ window.onload = function() {
     showLoginOverlay();
     verifySession();
 
-    console.log(document.getElementById('username'))
     document.getElementById('username')?.addEventListener('input', function() {
         const submitBtn = document.getElementById('login-btn');
-        console.log("Username input changed:", this.value);
         if (this.value.length >= 1) {
             submitBtn.disabled = false;
         } else {
@@ -70,12 +68,10 @@ async function login() {
 
         if (response.status === 200) {
             const data = await response.json();
-            console.log("Received token from server:", data.token);
             localStorage.setItem("credentials", data.token);
             hideLoginOverlay();
             userField.value = "";
             passField.value = "";
-            console.log("Successfully logged in!");
         } else {
             Notify("Invalid username or password.", "error");
         }
