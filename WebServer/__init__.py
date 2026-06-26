@@ -14,19 +14,19 @@ class WebServer:
         self.port = port
         self.routes = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
         self.auth = None
-        
+
+        # Where the installed package's bundled static files live
+        self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
+        self.package_default_js = os.path.join(self.package_public_dir, 'webserver.js')
+        self.package_auth_js = os.path.join(self.package_public_dir, 'auth.js')
+        self.framework_assets_prefix = '/framework-assets/'
+
         # Allow callers to override where static files live. If not provided,
         # try several sensible locations so the framework works when used
         # either as a script or when imported as a package.
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
         self.static_dir = None
-        # Where the installed package's bundled static files live
-        self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
-        self.package_default_js = os.path.join(self.package_public_dir, 'webserver.js')
-        self.package_auth_js = os.path.join(self.package_public_dir, 'auth.js')
-        # URL prefix exposed for framework-bundled assets
-        self.framework_assets_prefix = '/framework-assets/'
         if static_dir:
             candidate = os.path.abspath(static_dir)
             if os.path.exists(candidate) and os.path.isdir(candidate):
@@ -66,29 +66,84 @@ class WebServer:
             print(f"[ web_framework ] Static file serving enabled from: {self.static_dir}")
 
             self.default_js = None
-            for js_file, js_url in [('webserver.js', '/webserver.js'), ('default.js', '/default.js')]:
+            for js_file in ['webserver.js', 'default.js']:
                 candidate_path = os.path.join(self.static_dir, js_file)
                 if os.path.exists(candidate_path) and os.path.isfile(candidate_path):
-                    self.default_js = js_url
+                    self.default_js = '/webserver.js'
                     print(f"[ web_framework ] Default script injection enabled: {self.default_js}")
                     break
-            if self.default_js is None and os.path.exists(self.package_default_js):
-                # Expose the package-provided default script under the framework prefix
-                self.default_js = self.framework_assets_prefix + 'webserver.js'
+
+            if self.default_js is None and os.path.exists(self.package_default_js) and os.path.isfile(self.package_default_js):
+                self.default_js = '/webserver.js'
                 print(f"[ web_framework ] Default script injection enabled from package assets: {self.default_js}")
 
-            # Determine auth.js URL: prefer project-local, otherwise expose package auth under the framework prefix
             auth_js_path = os.path.join(self.static_dir, 'auth.js')
             if os.path.exists(auth_js_path) and os.path.isfile(auth_js_path):
                 self.auth_js = '/auth.js'
             elif os.path.exists(self.package_auth_js) and os.path.isfile(self.package_auth_js):
-                self.auth_js = self.framework_assets_prefix + 'auth.js'
+                self.auth_js = '/auth.js'
             else:
                 self.auth_js = None
         else:
             print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory next to your script or pass `static_dir` to WebServer.")
             self.default_js = None
             self.auth_js = None
+
+        # Register framework-provided JS routes inside the server.
+        @self.route('GET', '/auth.js')
+        def serve_auth_js(request):
+            if not self.auth:
+                request.send_response(404)
+                request.end_headers()
+                return
+
+            local_path = os.path.join(self.static_dir, 'auth.js') if self.static_dir else None
+            package_path = self.package_auth_js
+            if local_path and os.path.exists(local_path) and os.path.isfile(local_path):
+                path = local_path
+            elif os.path.exists(package_path) and os.path.isfile(package_path):
+                path = package_path
+            else:
+                request.send_response(404)
+                request.end_headers()
+                return
+
+            with open(path, 'rb') as f:
+                content = f.read()
+            request.send_response(200)
+            request.send_header('Content-Type', 'application/javascript')
+            request.end_headers()
+            request.wfile.write(content)
+
+        @self.route('GET', '/webserver.js')
+        def serve_webserver_js(request):
+            local_js = None
+            if self.static_dir:
+                local_js = os.path.join(self.static_dir, 'webserver.js')
+                if not os.path.exists(local_js) or not os.path.isfile(local_js):
+                    local_js = os.path.join(self.static_dir, 'default.js')
+                    if not os.path.exists(local_js) or not os.path.isfile(local_js):
+                        local_js = None
+
+            package_js = None
+            if os.path.exists(self.package_default_js) and os.path.isfile(self.package_default_js):
+                package_js = self.package_default_js
+            package_default_js = os.path.join(self.package_public_dir, 'default.js')
+            if package_js is None and os.path.exists(package_default_js) and os.path.isfile(package_default_js):
+                package_js = package_default_js
+
+            path = local_js or package_js
+            if not path:
+                request.send_response(404)
+                request.end_headers()
+                return
+
+            with open(path, 'rb') as f:
+                content = f.read()
+            request.send_response(200)
+            request.send_header('Content-Type', 'application/javascript')
+            request.end_headers()
+            request.wfile.write(content)
 
     def addPath(self, url_path, file_path):
         """Maps a URL to ANY file, safely resolving the path."""
@@ -110,20 +165,6 @@ class WebServer:
     def getDatabaseConnection():
         return get_connection()
 
-    def get_inject_js_urls(self):
-        urls = []
-        if self.default_js:
-            urls.append(self.default_js)
-        if self.auth and self.auth_js:
-            urls.append(self.auth_js)
-        return urls
-
-    def can_serve_static_js(self, file_name):
-        """Allow serving public JS files only when appropriate."""
-        if file_name.lower() == 'auth.js':
-            return bool(self.auth)
-        return True
-
     def checkAuth(self, request):
         """Checks if the request is authenticated. Returns user data if valid, else None.\n Remeber to use .settings before to enable auth"""
         if self.auth:
@@ -137,6 +178,20 @@ class WebServer:
         if self.auth:
             return create_token_for_user(username)
         return "Authentication is not enabled. Please use .settings(auth=True) to enable it."
+
+    def get_inject_js_urls(self):
+        urls = []
+        if self.default_js:
+            urls.append(self.default_js)
+        if self.auth and self.auth_js:
+            urls.append(self.auth_js)
+        return urls
+
+    def can_serve_static_js(self, file_name):
+        """Allow serving public JS files only when appropriate."""
+        if file_name.lower() == 'auth.js':
+            return bool(self.auth)
+        return True
 
     def route(self, method, path):
         def decorator(func):
@@ -154,13 +209,10 @@ class WebServer:
         server.static_dir = self.static_dir
         server.default_js = self.default_js
         server.auth_js = self.auth_js
-        server.package_public_dir = getattr(self, 'package_public_dir', None)
-        server.package_default_js = getattr(self, 'package_default_js', None)
-        server.package_auth_js = getattr(self, 'package_auth_js', None)
+        server.framework_assets_prefix = self.framework_assets_prefix
+        server.package_public_dir = self.package_public_dir
         server.can_serve_static_js = self.can_serve_static_js
         server.get_inject_js_urls = self.get_inject_js_urls
-
-        print("CRITICAL DEBUG - URLs to inject:", self.get_inject_js_urls())
         
         print(f"[ web_framework ] Secure Internal Server running on http://{self.host}:{self.port}")
         print("[ web_framework ] Press Ctrl+C to stop.")
