@@ -1,4 +1,5 @@
 window.onload = function() {
+    console.log("Initializing authentication overlay...");
     createLoginOverlay();
     showLoginOverlay();
     verifySession();
