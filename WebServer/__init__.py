@@ -96,6 +96,9 @@ class WebServer:
 
             request.send_response(200)
             request.send_header('Content-Type', 'application/javascript')
+            request.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            request.send_header('Pragma', 'no-cache')
+            request.send_header('Expires', '0')
             request.end_headers()
             request.wfile.write(content)
 
@@ -127,6 +130,9 @@ class WebServer:
 
             request.send_response(200)
             request.send_header('Content-Type', 'application/javascript')
+            request.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            request.send_header('Pragma', 'no-cache')
+            request.send_header('Expires', '0')
             request.end_headers()
             request.wfile.write(content)
 
