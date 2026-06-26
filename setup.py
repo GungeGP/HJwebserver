@@ -1,9 +1,11 @@
-from setuptools import setup, find_packages  # type: ignore[import]
+from setuptools import setup  # type: ignore[import]
 
 setup(
     name="HJwebserver",
-    version="0.1.2",
-    # find_packages() automatically looks for any folders with an __init__.py file
-    packages=find_packages(),
+    version="0.1.3",
+    # Explicitly package only the real source package to avoid accidentally
+    # publishing stale build artifacts.
+    packages=["WebServer"],
+    package_dir={"WebServer": "WebServer"},
     include_package_data=True,
 )

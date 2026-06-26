@@ -4,11 +4,22 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
-FRAMEWORK_ASSETS_PREFIX = '/framework-assets/'
+
+def inject_js_scripts(content, urls):
+    if not urls:
+        return content
+
+    injections = [f'<script src="{url}"></script>'.encode('utf-8') for url in urls]
+    injection = b''.join(injections)
+    lower = content.lower()
+    idx = lower.rfind(b'</body>')
+    if idx != -1:
+        return content[:idx] + injection + content[idx:]
+    return content + injection
 
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
-    
+
     def handle_request(self, method):
         parsed_url = urlparse(self.path)
         path = parsed_url.path
@@ -52,18 +63,31 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b"500 - Internal Server Error")
                 
-        # 2. The Static Directory Fallback
+        # 2. The Static Directory Fallback (and package assets)
         elif method == 'GET' and getattr(self.server, 'static_dir', None):
             safe_path = path.lstrip('/')
             file_path = os.path.join(self.server.static_dir, safe_path)
             
             if os.path.exists(file_path) and os.path.isfile(file_path):
+                file_name = os.path.basename(file_path)
+                can_serve = getattr(self.server, 'can_serve_static_js', lambda _: True)(file_name)
+                if not can_serve:
+                    self.send_response(404)
+                    self.end_headers()
+                    self.wfile.write(b"404 - Not Found")
+                    return
+
                 with open(file_path, 'rb') as f:
                     content = f.read()
                 
                 content_type, _ = mimetypes.guess_type(file_path)
                 if not content_type:
                     content_type = "application/octet-stream"
+
+                if content_type == 'text/html' and hasattr(self.server, 'get_inject_js_urls'):
+                    content = inject_js_scripts(content, self.server.get_inject_js_urls())
+                    file_path = None
+                    content_type = 'text/html'
                     
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)

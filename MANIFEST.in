@@ -1,1 +1,3 @@
 recursive-include WebServer/public *
+prune build
+prune *.egg-info
