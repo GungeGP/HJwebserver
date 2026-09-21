@@ -1,22 +1,28 @@
-"""Authentication: password hashing, JWT sessions and the login/logout routes.
+"""Authentication: password hashing, sessions, lockout, audit and the login routes.
 
-Sessions are JWTs carried in an HttpOnly cookie (set on login) or, for
-non-browser clients, in an ``Authorization: Bearer <token>`` header.
-Route enforcement itself happens in WebHandler; this module only decides
-*who* a request belongs to (``resolve_user``) and handles login/logout.
+A session is a signed JWT whose ``jti`` must also exist in the ``Sessions``
+table. That makes sessions revocable: logout deletes one row, changing a
+password or calling ``revokeSessions`` deletes all rows for a user.
+
+The token travels in an HttpOnly cookie (browsers) or, when enabled, in an
+``Authorization: Bearer <token>`` header (scripts). Route enforcement itself
+happens in WebHandler; this module decides *who* a request belongs to
+(``resolve_user``) and handles login/logout.
 """
 
 import hashlib
 import hmac
 import json
 import os
-from datetime import datetime, timedelta, timezone
+import secrets
+import time
+from datetime import timedelta
 from http.cookies import SimpleCookie
 
 import jwt
 from dotenv import load_dotenv
 
-from WebServer.database import create_user, get_user_by_username, update_user_password
+from WebServer import database as db
 from WebServer.helper import _send_json
 
 MIN_SECRET_LENGTH = 32
@@ -26,6 +32,13 @@ _settings = {
     "lifetime": timedelta(days=1),
     "cookie_name": "hj_session",
     "secure_cookie": False,
+    "bearer_tokens": True,
+    "max_login_attempts": 5,
+    "lockout_minutes": 15,
+    "min_password_length": 8,
+    "audit": True,
+    "trust_proxy": False,
+    "dummy_hash": None,   # used to equalise timing for unknown usernames
 }
 
 
@@ -33,7 +46,9 @@ _settings = {
 # Configuration
 # ---------------------------------------------------------------------------
 
-def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False):
+def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False, bearer_tokens=True,
+              max_login_attempts=5, lockout_minutes=15, min_password_length=8, audit=True,
+              trust_proxy=False):
     """Validate and store auth settings. Called from WebServer.settings(auth=True)."""
     load_dotenv()
     secret = jwt_secret or os.getenv("JWT_SECRET")
@@ -43,9 +58,19 @@ def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False):
             "(or pass jwtSecret= to settings()). Generate one with:\n"
             "  python -c \"import secrets; print(secrets.token_hex(32))\""
         )
-    _settings["secret"] = secret
-    _settings["lifetime"] = timedelta(hours=token_lifetime_hours)
-    _settings["secure_cookie"] = bool(secure_cookie)
+    _settings.update(
+        secret=secret,
+        lifetime=timedelta(hours=token_lifetime_hours),
+        secure_cookie=bool(secure_cookie),
+        bearer_tokens=bool(bearer_tokens),
+        max_login_attempts=int(max_login_attempts),
+        lockout_minutes=float(lockout_minutes),
+        min_password_length=int(min_password_length),
+        audit=bool(audit),
+        trust_proxy=bool(trust_proxy),
+        dummy_hash=hash_password(secrets.token_hex(16)),
+    )
+    _lockouts.clear()
 
 
 def attach_auth_routes(server):
@@ -100,29 +125,130 @@ def needs_rehash(stored):
     return bool(stored) and not stored.startswith("scrypt$")
 
 
+def check_password_policy(password):
+    """Raise ValueError if the password does not meet the configured policy."""
+    if not password:
+        raise ValueError("Password is required.")
+    if len(password) < _settings["min_password_length"]:
+        raise ValueError(f"Password must be at least {_settings['min_password_length']} characters.")
+
+
+# ---------------------------------------------------------------------------
+# Lockout (in-memory; the server is single-threaded)
+# ---------------------------------------------------------------------------
+
+_lockouts = {}   # key -> {"count": int, "last": ts, "until": ts}
+
+
+def _lockout_keys(username, ip):
+    return [f"user:{username.lower()}", f"ip:{ip}"]
+
+
+def _lockout_remaining(username, ip):
+    """Seconds left on the lockout for this username/IP, or 0."""
+    now = time.time()
+    remaining = 0
+    for key in _lockout_keys(username, ip):
+        entry = _lockouts.get(key)
+        if entry and entry["until"] > now:
+            remaining = max(remaining, entry["until"] - now)
+    return int(remaining) + (1 if remaining else 0)
+
+
+def _record_failure(username, ip):
+    now = time.time()
+    window = _settings["lockout_minutes"] * 60
+    for key in _lockout_keys(username, ip):
+        entry = _lockouts.get(key)
+        if not entry or now - entry["last"] > window:
+            entry = {"count": 0, "last": now, "until": 0}
+        entry["count"] += 1
+        entry["last"] = now
+        if entry["count"] >= _settings["max_login_attempts"]:
+            entry["until"] = now + window
+        _lockouts[key] = entry
+
+
+def _clear_failures(username, ip):
+    for key in _lockout_keys(username, ip):
+        _lockouts.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
+# Audit
+# ---------------------------------------------------------------------------
+
+def client_ip(request):
+    """Best-effort client address; honours X-Forwarded-For only when trustProxy is on."""
+    if _settings["trust_proxy"]:
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            return forwarded.split(',')[0].strip()
+    try:
+        return request.client_address[0]
+    except Exception:
+        return None
+
+
+def audit(event, username=None, detail=None, request=None):
+    """Record a security-relevant event. Also printed to the console."""
+    ip = client_ip(request) if request is not None else None
+    print(f"[ audit ] {event} user={username!r} ip={ip} {detail or ''}".rstrip())
+    if _settings["audit"]:
+        try:
+            db.insert_audit(time.time(), username, event, detail, ip)
+        except Exception as e:
+            print(f"[ audit ] could not write AuditLog: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Tokens / sessions
 # ---------------------------------------------------------------------------
 
 def create_token_for_user(username):
-    now = datetime.now(timezone.utc)
-    payload = {"username": username, "iat": now, "exp": now + _settings["lifetime"]}
+    """Mint a token and register its session row."""
+    now = int(time.time())
+    expires = now + int(_settings["lifetime"].total_seconds())
+    jti = secrets.token_hex(16)
+    db.create_session(jti, username, now, expires)
+    payload = {"username": username, "jti": jti, "iat": now, "exp": expires}
     return jwt.encode(payload, _settings["secret"], algorithm="HS256")
 
 
 def verify_token(token):
+    """Signature + expiry + the session row must still exist. Returns the payload or None."""
     try:
-        return jwt.decode(token, _settings["secret"], algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return None
+        payload = jwt.decode(token, _settings["secret"], algorithms=["HS256"])
     except jwt.InvalidTokenError:
         return None
+    jti = payload.get("jti")
+    if not jti:
+        return None
+    session = db.get_session(jti)
+    if session is None or session.Username != payload.get("username") or session.ExpiresAt < time.time():
+        return None
+    return payload
+
+
+def revoke_token(token):
+    """Delete the session behind a token (ignores invalid tokens)."""
+    try:
+        payload = jwt.decode(token, _settings["secret"], algorithms=["HS256"], options={"verify_exp": False})
+    except jwt.InvalidTokenError:
+        return
+    if payload.get("jti"):
+        db.delete_session(payload["jti"])
+
+
+def revoke_sessions(username):
+    db.delete_sessions_for_user(username)
 
 
 def _token_from_request(request):
-    auth_header = request.headers.get('Authorization')
-    if auth_header and auth_header.startswith("Bearer "):
-        return auth_header.split(" ", 1)[1].strip()
+    if _settings["bearer_tokens"]:
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith("Bearer "):
+            return auth_header.split(" ", 1)[1].strip()
 
     cookie_header = request.headers.get('Cookie')
     if cookie_header:
@@ -189,16 +315,37 @@ def _login_route(request):
 
     username = str(username).strip()
     password = str(password)
+    ip = client_ip(request) or "?"
 
-    user_record = get_user_by_username(username)
-    if user_record is None or not verify_password(password, user_record.PasswordHash):
+    remaining = _lockout_remaining(username, ip)
+    if remaining:
+        audit("login_locked", username, f"retry in {remaining}s", request)
+        _send_json(request, 429, {"error": f"Too many failed attempts. Try again in {remaining} seconds."},
+                   headers={"Retry-After": str(remaining)})
+        return
+
+    user_record = db.get_user_by_username(username)
+    if user_record is None:
+        # Spend the same time as a real check so timing can't reveal which usernames exist.
+        verify_password(password, _settings["dummy_hash"])
+        ok = False
+    else:
+        ok = verify_password(password, user_record.PasswordHash)
+
+    if not ok:
+        _record_failure(username, ip)
+        audit("login_failed", username, None, request)
         _send_json(request, 401, {"error": "Invalid username or password."})
         return
 
+    _clear_failures(username, ip)
     if needs_rehash(user_record.PasswordHash):
-        update_user_password(username, hash_password(password))
+        db.update_user_password(username, hash_password(password))
+        audit("password_rehashed", username, "legacy plaintext upgraded", request)
 
+    db.delete_expired_sessions(time.time())
     token = create_token_for_user(username)
+    audit("login_ok", username, None, request)
     _send_json(
         request, 200,
         {"valid": True, "message": "Login successful", "token": token},
@@ -207,6 +354,13 @@ def _login_route(request):
 
 
 def _logout_route(request):
+    token = _token_from_request(request)
+    username = None
+    if token:
+        user = resolve_user(request)
+        username = user["username"] if user else None
+        revoke_token(token)
+    audit("logout", username, None, request)
     _send_json(request, 200, {"valid": False, "message": "Logged out"},
                headers={"Set-Cookie": _session_cookie(None)})
 

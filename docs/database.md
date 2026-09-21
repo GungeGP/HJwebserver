@@ -28,11 +28,13 @@ By default `setDatabase` creates these if they are missing (`createTables=False`
 
 ```
 Users            (Id, Username, PasswordHash)
+Sessions         (Jti, Username, CreatedAt, ExpiresAt)
+AuditLog         (Id, At, Username, Event, Detail, Ip)
 WorkTimeEntries  (Id, Username, WorkDate, StartTime, EndTime)
 ```
 
-`Users` is used by the login system. Both statements are "create if not exists",
-so existing tables are never altered.
+The first three are used by the login system. All statements are "create if
+not exists", so existing tables are never altered.
 
 ## Your own queries
 

@@ -168,6 +168,24 @@ _SCHEMA = {
             EndTime TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS Sessions (
+            Jti TEXT PRIMARY KEY,
+            Username TEXT NOT NULL,
+            CreatedAt INTEGER NOT NULL,
+            ExpiresAt INTEGER NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS AuditLog (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            At INTEGER NOT NULL,
+            Username TEXT,
+            Event TEXT NOT NULL,
+            Detail TEXT,
+            Ip TEXT
+        )
+        """,
     ],
     "mssql": [
         """
@@ -188,6 +206,26 @@ _SCHEMA = {
             EndTime TIME NOT NULL
         )
         """,
+        """
+        IF OBJECT_ID('Sessions', 'U') IS NULL
+        CREATE TABLE Sessions (
+            Jti NVARCHAR(64) PRIMARY KEY,
+            Username NVARCHAR(255) NOT NULL,
+            CreatedAt BIGINT NOT NULL,
+            ExpiresAt BIGINT NOT NULL
+        )
+        """,
+        """
+        IF OBJECT_ID('AuditLog', 'U') IS NULL
+        CREATE TABLE AuditLog (
+            Id INT IDENTITY(1,1) PRIMARY KEY,
+            At BIGINT NOT NULL,
+            Username NVARCHAR(255) NULL,
+            Event NVARCHAR(64) NOT NULL,
+            Detail NVARCHAR(1024) NULL,
+            Ip NVARCHAR(64) NULL
+        )
+        """,
     ],
     "mysql": [
         """
@@ -206,12 +244,30 @@ _SCHEMA = {
             EndTime TIME NOT NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS Sessions (
+            Jti VARCHAR(64) PRIMARY KEY,
+            Username VARCHAR(255) NOT NULL,
+            CreatedAt BIGINT NOT NULL,
+            ExpiresAt BIGINT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS AuditLog (
+            Id INT AUTO_INCREMENT PRIMARY KEY,
+            At BIGINT NOT NULL,
+            Username VARCHAR(255) NULL,
+            Event VARCHAR(64) NOT NULL,
+            Detail VARCHAR(1024) NULL,
+            Ip VARCHAR(64) NULL
+        )
+        """,
     ],
 }
 
 
 def create_tables():
-    """Create the Users and WorkTimeEntries tables if they do not already exist."""
+    """Create the framework tables (Users, WorkTimeEntries, Sessions, AuditLog) if missing."""
     for statement in _SCHEMA[_config["type"]]:
         execute(statement)
 
@@ -245,3 +301,52 @@ def create_user(username, password_hash):
 def update_user_password(username, password_hash):
     sql = "UPDATE Users SET PasswordHash = ? WHERE Username = ?"
     execute(sql, (password_hash, username))
+
+
+def delete_user(username):
+    execute("DELETE FROM Users WHERE Username = ?", (username,))
+
+
+# --- Sessions -------------------------------------------------------------
+
+def create_session(jti, username, created_at, expires_at):
+    execute("INSERT INTO Sessions (Jti, Username, CreatedAt, ExpiresAt) VALUES (?, ?, ?, ?)",
+            (jti, username, int(created_at), int(expires_at)))
+
+
+def get_session(jti):
+    return fetch_one("SELECT Jti, Username, CreatedAt, ExpiresAt FROM Sessions WHERE Jti = ?", (jti,))
+
+
+def delete_session(jti):
+    execute("DELETE FROM Sessions WHERE Jti = ?", (jti,))
+
+
+def delete_sessions_for_user(username):
+    execute("DELETE FROM Sessions WHERE Username = ?", (username,))
+
+
+def delete_expired_sessions(now):
+    execute("DELETE FROM Sessions WHERE ExpiresAt < ?", (int(now),))
+
+
+def get_sessions_for_user(username):
+    return fetch_all("SELECT Jti, Username, CreatedAt, ExpiresAt FROM Sessions WHERE Username = ? ORDER BY CreatedAt DESC",
+                     (username,))
+
+
+# --- Audit log ------------------------------------------------------------
+
+def insert_audit(at, username, event, detail, ip):
+    execute("INSERT INTO AuditLog (At, Username, Event, Detail, Ip) VALUES (?, ?, ?, ?, ?)",
+            (int(at), username, event, detail, ip))
+
+
+def get_audit_log(limit=100, username=None):
+    where = "WHERE Username = ?" if username else ""
+    params = (username,) if username else ()
+    if _config["type"] == "mssql":
+        sql = f"SELECT TOP {int(limit)} Id, At, Username, Event, Detail, Ip FROM AuditLog {where} ORDER BY Id DESC"
+    else:
+        sql = f"SELECT Id, At, Username, Event, Detail, Ip FROM AuditLog {where} ORDER BY Id DESC LIMIT {int(limit)}"
+    return fetch_all(sql, params)

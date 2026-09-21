@@ -11,7 +11,7 @@ app.addPath('/', 'public/index.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
 # Users are created from code (no self-registration). Returns False if the user already exists.
-# app.createUser("admin", "change-me")
+# app.createUser("admin", "change-me-please")   # min 8 characters
 
 @app.route('POST', '/api/data')
 def data_route(request):

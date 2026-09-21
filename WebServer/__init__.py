@@ -6,6 +6,19 @@ from WebServer.FileHandler import handle_file_request
 from WebServer.WebHandler import WebHandler
 from WebServer.database import createConnection, get_connection, create_tables
 
+DEFAULT_CSP = (
+    "default-src 'self' https:; "
+    "script-src 'self' https: 'unsafe-inline'; "
+    "style-src 'self' https: 'unsafe-inline'; "
+    "img-src 'self' https: data:; "
+    "font-src 'self' https: data:; "
+    "connect-src 'self' https:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
 class WebServer:
     """The clean interface your teammates will actually use."""
     
@@ -14,6 +27,10 @@ class WebServer:
         self.port = port
         self.routes = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
         self.auth = None
+        self.certfile = None
+        self.keyfile = None
+        self.csp = DEFAULT_CSP
+        self.security_headers_enabled = True
 
         # Where the installed package's bundled static files live
         self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
@@ -143,20 +160,59 @@ class WebServer:
         """
         self.routes = handle_file_request(self, url_path, file_path, public=public)
 
-    def settings(self, auth=None, jwtSecret=None, tokenLifetimeHours=24, secureCookie=False):
+    def settings(self, auth=None, jwtSecret=None, tokenLifetimeHours=24, secureCookie=False,
+                 bearerTokens=True, maxLoginAttempts=5, lockoutMinutes=15, minPasswordLength=5,
+                 auditLog=True, trustProxy=False, csp=DEFAULT_CSP, securityHeaders=True):
         """Configure server settings.
 
         auth:               enable authentication. Every route and page then requires
                             login unless registered with public=True.
         jwtSecret:          signing secret (>= 32 bytes). Defaults to JWT_SECRET from .env.
         tokenLifetimeHours: how long a login stays valid.
-        secureCookie:       add the Secure flag to the session cookie (needs HTTPS).
+        secureCookie:       add the Secure flag to the session cookie (needs HTTPS;
+                            set automatically by useHttps()).
+        bearerTokens:       also accept "Authorization: Bearer <token>" (for scripts).
+                            False = cookie only.
+        maxLoginAttempts:   failed logins (per username and per IP) before lockout.
+        lockoutMinutes:     how long a lockout lasts.
+        minPasswordLength:  enforced by createUser / setPassword.
+        auditLog:           write logins, logouts, lockouts and user changes to the AuditLog table.
+        trustProxy:         read the client IP from X-Forwarded-For (only behind a reverse proxy).
+        csp:                Content-Security-Policy header value, or None to send none.
+        securityHeaders:    send X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP.
         """
         self.auth = auth
+        self.csp = csp
+        self.security_headers_enabled = bool(securityHeaders)
         if self.auth:
             from WebServer.auth import attach_auth_routes, configure
-            configure(jwt_secret=jwtSecret, token_lifetime_hours=tokenLifetimeHours, secure_cookie=secureCookie)
+            configure(
+                jwt_secret=jwtSecret,
+                token_lifetime_hours=tokenLifetimeHours,
+                secure_cookie=secureCookie or bool(self.certfile),
+                bearer_tokens=bearerTokens,
+                max_login_attempts=maxLoginAttempts,
+                lockout_minutes=lockoutMinutes,
+                min_password_length=minPasswordLength,
+                audit=auditLog,
+                trust_proxy=trustProxy,
+            )
             attach_auth_routes(self)
+
+    def useHttps(self, certfile, keyfile):
+        """Serve over TLS using a PEM certificate and private key.
+
+        Also turns on the Secure cookie flag and HSTS. For a local self-signed pair:
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"
+        """
+        for path in (certfile, keyfile):
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"useHttps: file not found: {path}")
+        self.certfile = certfile
+        self.keyfile = keyfile
+        if self.auth:
+            from WebServer.auth import _settings
+            _settings["secure_cookie"] = True
 
     def setDatabase(self, type="mssql", server="localhost", dbName="test", user=None, password=None, port=None, createTables=True):
         """Configure the database backend.
@@ -189,28 +245,68 @@ class WebServer:
         return resolve_user(request)
 
     def createUser(self, username, password):
-        """Create a user with a hashed password. Returns False if the username already exists."""
-        from WebServer.auth import hash_password
+        """Create a user with a hashed password. Returns False if the username already exists.
+
+        Raises ValueError if the password is shorter than minPasswordLength.
+        """
+        from WebServer.auth import audit, check_password_policy, hash_password
         from WebServer.database import create_user, get_user_by_username
         username = str(username).strip()
-        if not username or not password:
-            raise ValueError("Username and password are required.")
+        if not username:
+            raise ValueError("Username is required.")
+        check_password_policy(str(password) if password is not None else "")
         if get_user_by_username(username) is not None:
             return False
         create_user(username, hash_password(str(password)))
+        audit("user_created", username)
         return True
 
     def setPassword(self, username, password):
-        """Replace a user's password. Returns False if the user does not exist."""
-        from WebServer.auth import hash_password
+        """Replace a user's password and log them out everywhere. Returns False if the user does not exist."""
+        from WebServer.auth import audit, check_password_policy, hash_password, revoke_sessions
         from WebServer.database import get_user_by_username, update_user_password
         username = str(username).strip()
-        if not password:
-            raise ValueError("Password is required.")
+        check_password_policy(str(password) if password is not None else "")
         if get_user_by_username(username) is None:
             return False
         update_user_password(username, hash_password(str(password)))
+        revoke_sessions(username)
+        audit("password_changed", username)
         return True
+
+    def deleteUser(self, username):
+        """Remove a user and all their sessions. Returns False if the user does not exist."""
+        from WebServer.auth import audit, revoke_sessions
+        from WebServer.database import delete_user, get_user_by_username
+        username = str(username).strip()
+        if get_user_by_username(username) is None:
+            return False
+        revoke_sessions(username)
+        delete_user(username)
+        audit("user_deleted", username)
+        return True
+
+    def revokeSessions(self, username):
+        """Log a user out of every browser/device immediately."""
+        from WebServer.auth import audit, revoke_sessions
+        revoke_sessions(str(username).strip())
+        audit("sessions_revoked", username)
+
+    def getSessions(self, username):
+        """Active sessions for a user (Jti, Username, CreatedAt, ExpiresAt as epoch seconds)."""
+        from WebServer.database import get_sessions_for_user
+        return get_sessions_for_user(str(username).strip())
+
+    def audit(self, request, event, detail=None):
+        """Record your own event in the AuditLog, attributed to the request's user and IP."""
+        from WebServer.auth import audit
+        user = getattr(request, 'user', None) or {}
+        audit(event, user.get("username"), detail, request)
+
+    def getAuditLog(self, limit=100, username=None):
+        """Most recent audit entries (Id, At, Username, Event, Detail, Ip), newest first."""
+        from WebServer.database import get_audit_log
+        return get_audit_log(limit=limit, username=username)
 
     def _asset_version(self, relative_file_name):
         """Return a stable cache-busting token for the active JS asset."""
@@ -257,6 +353,24 @@ class WebServer:
             return func
         return decorator
 
+    def _security_headers(self, request):
+        """Headers added to every response unless the handler already set them."""
+        if not self.security_headers_enabled:
+            return {}
+        headers = {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "same-origin",
+        }
+        if self.csp:
+            headers["Content-Security-Policy"] = self.csp
+        if self.certfile:
+            headers["Strict-Transport-Security"] = "max-age=31536000"
+        if getattr(request, 'user', None):
+            # Authenticated responses must not end up in shared/disk caches.
+            headers["Cache-Control"] = "no-store"
+        return headers
+
     def _login_shell_html(self):
         from WebServer.auth import login_shell_html
         return login_shell_html(self.get_inject_js_urls())
@@ -287,8 +401,18 @@ class WebServer:
         server.get_inject_js_urls = self.get_inject_js_urls
         server.resolve_user = self._resolve_user
         server.login_shell_html = self._login_shell_html
-        
-        print(f"[ web_framework ] Secure Internal Server running on http://{self.host}:{self.port}")
+        server.security_headers = self._security_headers
+
+        scheme = "http"
+        if self.certfile:
+            import ssl
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(self.certfile, self.keyfile)
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            scheme = "https"
+
+        print(f"[ web_framework ] Secure Internal Server running on {scheme}://{self.host}:{self.port}")
         print("[ web_framework ] Press Ctrl+C to stop.")
         try:
             server.serve_forever()

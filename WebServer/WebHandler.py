@@ -20,6 +20,31 @@ def inject_js_scripts(content, urls):
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
 
+    def __init__(self, *args, **kwargs):
+        self._sent_headers = set()
+        self.user = None
+        super().__init__(*args, **kwargs)
+
+    # --- security headers on every response -------------------------------
+
+    def send_response(self, code, message=None):
+        self._sent_headers = set()
+        super().send_response(code, message)
+
+    def send_header(self, keyword, value):
+        self._sent_headers.add(keyword.lower())
+        super().send_header(keyword, value)
+
+    def end_headers(self):
+        get_headers = getattr(self.server, 'security_headers', None)
+        if get_headers:
+            for name, value in get_headers(self).items():
+                if name.lower() not in self._sent_headers:
+                    self.send_header(name, value)
+        super().end_headers()
+
+    # --- authentication ---------------------------------------------------
+
     def _authorize(self, method, handler_function=None):
         """Enforce authentication for this request.
 

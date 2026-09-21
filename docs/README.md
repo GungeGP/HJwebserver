@@ -54,7 +54,7 @@ python -c "import secrets; print('JWT_SECRET=' + secrets.token_hex(32))" > .env
 and create at least one user (nobody can log in otherwise):
 
 ```python
-app.createUser("alice", "s3cret")
+app.createUser("alice", "correct-horse-battery")
 ```
 
 ### Project layout

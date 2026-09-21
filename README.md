@@ -1,8 +1,9 @@
 # HJwebserver
 
 A small Python web framework for internal tools: routes, static files, JSON
-parsing, a database layer (SQLite / MSSQL / MySQL) and cookie-based login, with
-almost no code to write.
+parsing, a database layer (SQLite / MSSQL / MySQL) and cookie-based login with
+hashed passwords, revocable sessions, lockout, audit log, security headers and
+optional HTTPS — with almost no code to write.
 
 ```python
 from WebServer import WebServer
