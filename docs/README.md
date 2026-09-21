@@ -14,7 +14,7 @@ connection and login.
 | [Database](database.md) | `setDatabase` backends, running your own queries |
 | [Authentication](auth.md) | How login works, sessions, protecting routes |
 | [Managing users](users.md) | CLI and Python API for users, roles, passwords, lockouts |
-| [Frontend](frontend.md) | The injected scripts, the login overlay, logout button, `Notify` |
+| [Frontend](frontend.md) | Shared header/footer includes, the login overlay, `hjAuth`, `Notify` |
 
 ## Getting started
 

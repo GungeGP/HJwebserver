@@ -81,6 +81,9 @@ public/img/logo.png   →  GET /img/logo.png
 public/index.html     →  GET /index.html
 ```
 
+HTML files can share a header/footer with `<!--#include file="…" -->` — see
+[Frontend → includes](frontend.md#shared-header-footer-navigation--includes).
+
 Routes take priority over static files with the same path. When auth is on,
 static files require login too (see [Authentication](auth.md)). Paths that try
 to leave the folder (`..`) and dotfiles (`.env`, `.git`) are always `404`.

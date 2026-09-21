@@ -15,6 +15,52 @@ The `?v=` value changes whenever the file changes, so browsers never use a stale
 You can override either script by putting your own `webserver.js` or `auth.js` in
 your `public/` folder; the framework serves yours instead of its bundled copy.
 
+## Shared header, footer, navigation — includes
+
+Any HTML page the framework serves can pull in another file:
+
+```html
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html>
+<head><title>Home</title></head>
+<body>
+  <!--#include file="partials/header.html" -->
+  <main>…</main>
+  <!--#include file="partials/footer.html" -->
+</body>
+</html>
+```
+
+```html
+<!-- public/partials/header.html -->
+<header>
+  <nav><a href="/">Home</a> <a href="/reports.html">Reports</a></nav>
+  <span id="who"></span>
+</header>
+```
+
+The include is expanded on the server before the page is sent, so the header
+is part of the HTML from the first byte — no JavaScript involved and no flash
+of a missing header.
+
+Rules:
+
+- The path is relative to the file doing the including. A leading `/` means
+  "from the `public/` root" — handy in sub-folders: `<!--#include file="/partials/header.html" -->`.
+- Included files can include other files (up to 5 levels). Circular includes stop.
+- Includes can't reach outside `public/`. A bad or missing path is replaced by an
+  HTML comment (`<!-- include "x" not found -->`) rather than breaking the page.
+- Works for pages from `public/` and for `addPath` pages. Included files are
+  plain HTML — no variables or logic. For per-user content, put a placeholder in
+  the partial and fill it from JS (the `hj:ready` example above).
+- `<!--#include virtual="…" -->` is accepted as an alias, so partials also work
+  unchanged under Apache/nginx/IIS SSI.
+
+Partials in `public/` are served as normal files too. If you'd rather they
+weren't reachable directly, keep them in a folder like `public/partials/` — they're
+harmless, but you can also block that folder with a route that returns 404.
+
 ## `webserver.js`
 
 Defines one global:

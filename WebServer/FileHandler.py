@@ -1,6 +1,8 @@
 import mimetypes
 import os
 
+from WebServer.includes import process_includes
+
 
 def inject_js_scripts(content, urls):
     if not urls:
@@ -32,6 +34,8 @@ def handle_file_request(self, url_path, file_path, public=False, roles=None):
                 content_type = "text/plain"
 
             if content_type == 'text/html':
+                include_root = self.static_dir or os.path.dirname(absolute_path)
+                content = process_includes(content, absolute_path, include_root)
                 inject_urls = getattr(self, 'get_inject_js_urls', lambda: [])()
                 content = inject_js_scripts(content, inject_urls)
 

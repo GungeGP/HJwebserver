@@ -4,6 +4,8 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
+from WebServer.includes import process_includes
+
 # Largest request body a route will accept (override with WebServer(...).max_body_bytes).
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
@@ -201,8 +203,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 if not content_type:
                     content_type = "application/octet-stream"
 
-                if content_type == 'text/html' and hasattr(self.server, 'get_inject_js_urls'):
-                    content = inject_js_scripts(content, self.server.get_inject_js_urls())
+                if content_type == 'text/html':
+                    content = process_includes(content, file_path, self.server.static_dir)
+                    if hasattr(self.server, 'get_inject_js_urls'):
+                        content = inject_js_scripts(content, self.server.get_inject_js_urls())
                     file_path = None
                     content_type = 'text/html'
                     
