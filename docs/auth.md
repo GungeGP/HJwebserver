@@ -66,6 +66,17 @@ one IP address, further attempts get `429 Too Many Requests` with a
 password. The counter resets on a successful login. Lockouts are kept in
 memory and cleared when the server restarts.
 
+### Getting a locked-out user back in
+
+| Way | How |
+|-----|-----|
+| Wait | The `429` response says how long (`"Try again in 847 seconds"`, plus a `Retry-After` header). |
+| Unlock from Python | `app.unlock("alice")` — lifts her lockout and any IP lockout her attempts caused. `app.unlock(ip="10.0.0.5")` for an address, `app.unlock()` for everything. |
+| See who is locked | `app.getLockouts()` → `[{"type": "username", "value": "alice", "failures": 5, "remaining": 612}, ...]` |
+| Restart the server | Clears all lockouts (they are in memory). |
+
+Unlocking is recorded in the audit log as `lockout_cleared`.
+
 Login also takes the same amount of time whether or not the username exists,
 so an attacker cannot discover valid usernames by timing.
 

@@ -4,6 +4,9 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
+# Largest request body a route will accept (override with WebServer(...).max_body_bytes).
+MAX_BODY_BYTES = 10 * 1024 * 1024
+
 
 def inject_js_scripts(content, urls):
     if not urls:
@@ -42,6 +45,23 @@ class WebHandler(BaseHTTPRequestHandler):
                 if name.lower() not in self._sent_headers:
                     self.send_header(name, value)
         super().end_headers()
+
+    # --- static files -----------------------------------------------------
+
+    def _resolve_static(self, url_path):
+        """Map a URL path to a file inside static_dir, or None if it escapes it.
+
+        Rejects '..' segments, backslashes, and dotfiles (.env, .git, ...), and
+        re-checks the resolved real path so symlinks can't lead outside either.
+        """
+        static_root = os.path.realpath(self.server.static_dir)
+        segments = [s for s in url_path.replace('\\', '/').split('/') if s]
+        if any(seg in ('.', '..') or seg.startswith('.') for seg in segments):
+            return None
+        candidate = os.path.realpath(os.path.join(static_root, *segments)) if segments else static_root
+        if os.path.commonpath([static_root, candidate]) != static_root:
+            return None
+        return candidate
 
     # --- authentication ---------------------------------------------------
 
@@ -96,7 +116,21 @@ class WebHandler(BaseHTTPRequestHandler):
             self.body = None 
             
             if method in ['POST', 'PUT', 'PATCH']:
-                content_length = int(self.headers.get('Content-Length', 0))
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                except ValueError:
+                    content_length = -1
+                if content_length < 0:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"400 - Bad Request: Invalid Content-Length")
+                    return
+                max_body = getattr(self.server, 'max_body_bytes', MAX_BODY_BYTES)
+                if content_length > max_body:
+                    self.send_response(413)
+                    self.end_headers()
+                    self.wfile.write(b"413 - Request body too large")
+                    return
                 if content_length > 0:
                     raw_data = self.rfile.read(content_length)
                     content_type = self.headers.get('Content-Type', '')
@@ -130,10 +164,9 @@ class WebHandler(BaseHTTPRequestHandler):
             if not self._authorize(method):
                 return
 
-            safe_path = path.lstrip('/')
-            file_path = os.path.join(self.server.static_dir, safe_path)
-            
-            if os.path.exists(file_path) and os.path.isfile(file_path):
+            file_path = self._resolve_static(path)
+
+            if file_path and os.path.isfile(file_path):
                 file_name = os.path.basename(file_path)
                 can_serve = getattr(self.server, 'can_serve_static_js', lambda _: True)(file_name)
                 if not can_serve:

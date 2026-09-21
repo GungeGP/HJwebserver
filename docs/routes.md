@@ -82,7 +82,11 @@ public/index.html     →  GET /index.html
 ```
 
 Routes take priority over static files with the same path. When auth is on,
-static files require login too (see [Authentication](auth.md)).
+static files require login too (see [Authentication](auth.md)). Paths that try
+to leave the folder (`..`) and dotfiles (`.env`, `.git`) are always `404`.
+
+Request bodies larger than 10 MB are rejected with `413` before your handler
+runs. Change the limit with `app.max_body_bytes = ...` before `start()`.
 
 ## Which URLs the framework owns
 

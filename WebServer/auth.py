@@ -164,6 +164,7 @@ def _record_failure(username, ip):
             entry = {"count": 0, "last": now, "until": 0}
         entry["count"] += 1
         entry["last"] = now
+        entry["last_user"] = username.lower()
         if entry["count"] >= _settings["max_login_attempts"]:
             entry["until"] = now + window
         _lockouts[key] = entry
@@ -172,6 +173,41 @@ def _record_failure(username, ip):
 def _clear_failures(username, ip):
     for key in _lockout_keys(username, ip):
         _lockouts.pop(key, None)
+
+
+def unlock(username=None, ip=None):
+    """Clear the failed-login counter and lockout for a username and/or IP.
+
+    With no arguments, clears every lockout. Returns the number of entries removed.
+    """
+    if username is None and ip is None:
+        count = len(_lockouts)
+        _lockouts.clear()
+        return count
+    removed = 0
+    if username is not None:
+        username = username.lower()
+        removed += _lockouts.pop(f"user:{username}", None) is not None
+        # Also lift IP lockouts caused by this user's own attempts, so the
+        # person on the phone can log in straight away.
+        for key in [k for k, e in _lockouts.items() if k.startswith("ip:") and e.get("last_user") == username]:
+            _lockouts.pop(key, None)
+            removed += 1
+    if ip is not None:
+        removed += _lockouts.pop(f"ip:{ip}", None) is not None
+    return removed
+
+
+def get_lockouts():
+    """Currently locked-out usernames and IPs with seconds remaining."""
+    now = time.time()
+    result = []
+    for key, entry in _lockouts.items():
+        if entry["until"] > now:
+            kind, _, value = key.partition(":")
+            result.append({"type": "username" if kind == "user" else "ip", "value": value,
+                           "failures": entry["count"], "remaining": int(entry["until"] - now) + 1})
+    return result
 
 
 # ---------------------------------------------------------------------------

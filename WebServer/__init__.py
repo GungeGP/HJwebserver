@@ -31,6 +31,7 @@ class WebServer:
         self.keyfile = None
         self.csp = DEFAULT_CSP
         self.security_headers_enabled = True
+        self.max_body_bytes = 10 * 1024 * 1024   # largest accepted request body
 
         # Where the installed package's bundled static files live
         self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
@@ -292,6 +293,18 @@ class WebServer:
         revoke_sessions(str(username).strip())
         audit("sessions_revoked", username)
 
+    def unlock(self, username=None, ip=None):
+        """Lift a login lockout early. unlock("alice") or unlock(ip="10.0.0.5"); no arguments = all."""
+        from WebServer.auth import audit, unlock
+        removed = unlock(username, ip)
+        audit("lockout_cleared", username, f"ip={ip}" if ip else ("all" if username is None else None))
+        return removed
+
+    def getLockouts(self):
+        """Who is currently locked out: [{"type": "username"|"ip", "value", "failures", "remaining"}]."""
+        from WebServer.auth import get_lockouts
+        return get_lockouts()
+
     def getSessions(self, username):
         """Active sessions for a user (Jti, Username, CreatedAt, ExpiresAt as epoch seconds)."""
         from WebServer.database import get_sessions_for_user
@@ -402,6 +415,7 @@ class WebServer:
         server.resolve_user = self._resolve_user
         server.login_shell_html = self._login_shell_html
         server.security_headers = self._security_headers
+        server.max_body_bytes = self.max_body_bytes
 
         scheme = "http"
         if self.certfile:

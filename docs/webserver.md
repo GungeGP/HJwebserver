@@ -85,11 +85,24 @@ on the `Secure` cookie flag and the HSTS header.
 app.useHttps("cert.pem", "key.pem")
 ```
 
-For a local self-signed pair (browsers will warn once):
+`useHttps` only *serves* TLS; it does not obtain a certificate. You need to
+bring one:
+
+| Where from | Cost | Browsers trust it? |
+|------------|------|--------------------|
+| Self-signed (command below) | free | No — every user sees a warning and has to click through or import the cert. Fine for development. |
+| Your company's internal CA | free | Yes, on company-managed PCs. The normal choice for an internal tool — ask IT. |
+| Public CA (Let's Encrypt or paid) | free / paid | Yes, everywhere — but only possible if the server has a public DNS name the CA can reach. Not for `10.x.x.x` or `.local` names. |
+
+Self-signed pair for development:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"
 ```
+
+Certificates expire (Let's Encrypt: 90 days) and `useHttps` does not renew
+them. If you want automatic renewal, run a reverse proxy such as Caddy or nginx
+in front of the app instead, and pass `settings(secureCookie=True, trustProxy=True)`.
 
 Raises `FileNotFoundError` if either file is missing.
 
@@ -178,6 +191,21 @@ Remove the user and all their sessions. Returns `True`, or `False` if no such us
 ## `app.revokeSessions(username)`
 
 Log a user out of every browser and device immediately. Their next request gets `401`.
+
+---
+
+## `app.unlock(username=None, ip=None)`
+
+Lift a login lockout early. `unlock("alice")` clears her counter and any IP
+lockout caused by her attempts; `unlock(ip="10.0.0.5")` clears an address;
+`unlock()` clears everything. Returns how many entries were removed.
+
+---
+
+## `app.getLockouts()`
+
+Who is currently locked out: a list of `{"type": "username" | "ip", "value",
+"failures", "remaining"}` (seconds).
 
 ---
 
