@@ -3,14 +3,20 @@ import json
 from WebServer import WebServer
 
 app = WebServer(port=8080)
-app.setDatabase(server="localhost", dbName="workTime")
+# type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
+app.setDatabase(type="mssql", server="localhost", dbName="workTime")
+# app.setDatabase(type="sqlite", dbName="workTime.db")
+# app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html')
-app.settings(auth=True)  # Enable authentication for the server
+app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
+
+# Users are created from code (no self-registration). Returns False if the user already exists.
+# app.createUser("admin", "change-me")
 
 @app.route('POST', '/api/data')
 def data_route(request):
     # 1. You can now access the parsed frontend data directly!
-    print("Data received from frontend:", request.body)
+    print("Data received from frontend:", request.body, "from user:", request.user["username"])
     
     # 2. Prepare the response
     request.send_response(200)
@@ -21,7 +27,7 @@ def data_route(request):
     response_data = {"message": "The framework POST route works!", "status": "success"}
     request.wfile.write(json.dumps(response_data).encode('utf-8'))
 
-@app.route('GET', '/hello')
+@app.route('GET', '/hello', public=True)
 def hello_route(request):
     request.send_response(200)
     request.send_header('Content-Type', 'text/plain')

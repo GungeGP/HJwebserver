@@ -17,7 +17,7 @@ def inject_js_scripts(content, urls):
         return content[:idx] + injection + content[idx:]
     return content + injection
 
-def handle_file_request(self, url_path, file_path):
+def handle_file_request(self, url_path, file_path, public=False):
     safe_file_path = file_path.lstrip('/').lstrip('\\')
     absolute_path = os.path.join(self.base_dir, safe_file_path)
 
@@ -45,6 +45,8 @@ def handle_file_request(self, url_path, file_path):
             request.end_headers()
             # Print the absolute path in the error so the teammate knows EXACTLY where it looked
             request.wfile.write(f"Framework Error: Could not find file at {absolute_path}".encode('utf-8'))
+
+    automatic_handler._hj_public = bool(public)
 
     if 'GET' not in self.routes:
         self.routes['GET'] = {}

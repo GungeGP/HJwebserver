@@ -1,4 +1,7 @@
 # pip install -r requirements.txt --upgrade 
 # pip install -r requirements.txt --upgrade --force-reinstall --no-cache-dir
-pyodbc==5.3.0
+# Database drivers - install only the one(s) you use (sqlite is built into Python)
+pyodbc==5.3.0        # mssql
+PyMySQL==1.1.1       # mysql
 python-dotenv==1.2.2
+PyJWT==2.14.0

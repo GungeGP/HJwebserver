@@ -1,93 +1,112 @@
-window.onload = function() {
-    createLoginOverlay();
-    showLoginOverlay();
-    verifySession();
+// Framework login overlay. The session lives in an HttpOnly cookie set by the
+// server, so this file never sees or stores the token. It only:
+//   * renders the login form when the server says we're not authenticated
+//   * reloads the page after a successful login (so protected content is served)
+//   * watches every fetch() for a 401 and re-shows the form when a session expires
 
-    document.getElementById('username')?.addEventListener('input', function() {
-        const submitBtn = document.getElementById('login-btn');
-        if (this.value.length >= 1) {
-            submitBtn.disabled = false;
-        } else {
-            submitBtn.disabled = true;
+(function () {
+    // Wrap fetch so any 401 from a protected route brings the login form back.
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init) {
+        const response = await originalFetch(input, init);
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (response.status === 401 && !url.includes('/api/login')) {
+            showLoginOverlay();
         }
-    });
+        return response;
+    };
 
-    document.getElementById('logout')?.addEventListener('click', () => {
-        localStorage.removeItem("credentials");
-        document.getElementById("login-btn").disabled = true;
-        showLoginOverlay();
+    window.addEventListener('DOMContentLoaded', function () {
+        createLoginOverlay();
+        verifySession();
+
+        const form = document.getElementById('login-form');
+        form?.addEventListener('submit', login);
+        // Explicit Enter handling; preventDefault stops the implicit submit so login() runs once.
+        form?.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') { login(event); }
+        });
+        document.getElementById('username')?.addEventListener('input', updateSubmitState);
+        document.getElementById('password')?.addEventListener('input', updateSubmitState);
+
+        // Optional: any element with id="logout" on the page becomes a logout button.
+        document.getElementById('logout')?.addEventListener('click', logout);
     });
-};
+})();
 
 async function verifySession() {
-    const token = localStorage.getItem("credentials");
-    if (!token) { return; }
     try {
-        const response = await fetch("/api/verify", {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${token}` }
-        });
-
+        const response = await fetch('/api/verify');
         if (response.status === 200) {
             hideLoginOverlay();
-        } else { localStorage.removeItem("credentials"); }
+        } else {
+            showLoginOverlay();
+        }
     } catch (error) {
-        console.error("Server connection failed:", error);
+        console.error('Server connection failed:', error);
     }
 }
 
-document.addEventListener("keypress", function(event) {
-    if (event.key === "Enter") {
-        const loginOverlay = document.getElementById("login-overlay");
-        if (loginOverlay?.style.display !== "none") { login(); }
-    }
-});
-
-async function login() {
+async function login(event) {
     if (event) { event.preventDefault(); }
 
-    const userField = document.getElementById("username");
-    const passField = document.getElementById("password");
-
-    const username = userField?.value;
+    const userField = document.getElementById('username');
+    const passField = document.getElementById('password');
+    const username = userField?.value.trim();
     const password = passField?.value;
 
-    if (!username) {
-        Notify("Username cannot be empty.", "error");
+    if (!username || !password) {
+        Notify('Username and password are required.', 'error');
         return;
     }
 
     try {
-        const response = await fetch("/api/login", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ username: username, password: password })
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
         });
 
         if (response.status === 200) {
-            const data = await response.json();
-            localStorage.setItem("credentials", data.token);
-            hideLoginOverlay();
-            userField.value = "";
-            passField.value = "";
+            // The cookie is set; reload so the server serves the protected page.
+            window.location.reload();
         } else {
-            Notify("Invalid username or password.", "error");
+            passField.value = '';
+            updateSubmitState();
+            Notify('Invalid username or password.', 'error');
         }
     } catch (error) {
-        console.error("Login request failed:", error);
-        Notify("Could not connect to the server.", "error");
+        console.error('Login request failed:', error);
+        Notify('Could not connect to the server.', 'error');
     }
 }
 
+async function logout() {
+    try {
+        await fetch('/api/logout', { method: 'POST' });
+    } catch (error) {
+        console.error('Logout request failed:', error);
+    }
+    window.location.reload();
+}
+
+function updateSubmitState() {
+    const username = document.getElementById('username')?.value.trim();
+    const password = document.getElementById('password')?.value;
+    const submitBtn = document.getElementById('login-btn');
+    if (submitBtn) { submitBtn.disabled = !(username && password); }
+}
+
 function showLoginOverlay() {
-    const overlay = document.getElementById("login-overlay");
-    if (overlay) { overlay.style.display = "flex"; }
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) {
+        overlay.style.display = 'flex';
+        document.getElementById('username')?.focus();
+    }
 }
 function hideLoginOverlay() {
-    const overlay = document.getElementById("login-overlay");
-    if (overlay) { overlay.style.display = "none"; }
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) { overlay.style.display = 'none'; }
 }
 
 function createLoginOverlay() {
@@ -104,12 +123,12 @@ function createLoginOverlay() {
             background-color: rgba(0, 0, 0, 0.5); /* Dark, slightly transparent background */
             /* blur background */
             backdrop-filter: blur(5px);
-            
+
             /* Flexbox centers the login box perfectly in the middle of the screen */
-            display: flex; 
+            display: none;
             justify-content: center;
             align-items: center;
-            
+
             z-index: 9999; /* Ensures it sits on top of absolutely everything else */
         }
         /* The white box in the middle */
@@ -190,7 +209,7 @@ function createLoginOverlay() {
                 <p>Please log in to continue.</p>
                 <input type="text" id="username" placeholder="Username" autocomplete="username">
                 <input type="password" id="password" placeholder="Password" autocomplete="current-password">
-                <button id="login-btn" disabled onclick="login()" type="submit">Sign In</button>
+                <button id="login-btn" disabled type="submit">Sign In</button>
             </form>
         </div>
     `;

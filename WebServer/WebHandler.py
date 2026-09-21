@@ -20,6 +20,40 @@ def inject_js_scripts(content, urls):
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
 
+    def _authorize(self, method, handler_function=None):
+        """Enforce authentication for this request.
+
+        Returns True when the request may proceed (and sets ``self.user``).
+        Otherwise writes a 401 response and returns False. When auth is
+        disabled, or the route is marked ``public=True``, everything passes.
+        """
+        self.user = None
+        if not getattr(self.server, 'auth', None):
+            return True
+        if handler_function is not None and getattr(handler_function, '_hj_public', False):
+            return True
+
+        resolve_user = getattr(self.server, 'resolve_user', None)
+        user = resolve_user(self) if resolve_user else None
+        if user:
+            self.user = user
+            return True
+
+        # Browser navigation to a protected page gets the login shell; API
+        # calls get a JSON 401 that auth.js turns into the login overlay.
+        wants_html = method == 'GET' and 'text/html' in self.headers.get('Accept', '')
+        self.send_response(401)
+        if wants_html and hasattr(self.server, 'login_shell_html'):
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(self.server.login_shell_html())
+        else:
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Authentication required."}).encode('utf-8'))
+        return False
+
     def handle_request(self, method):
         parsed_url = urlparse(self.path)
         path = parsed_url.path
@@ -28,6 +62,9 @@ class WebHandler(BaseHTTPRequestHandler):
         # 1. Check if the teammate wrote a specific route
         if method in routes and path in routes[method]:
             handler_function = routes[method][path]
+
+            if not self._authorize(method, handler_function):
+                return
             
             # --- NEW: AUTOMATIC DATA PARSER ---
             # Create a clean .body property for the teammate to use
@@ -65,6 +102,9 @@ class WebHandler(BaseHTTPRequestHandler):
                 
         # 2. The Static Directory Fallback (and package assets)
         elif method == 'GET' and getattr(self.server, 'static_dir', None):
+            if not self._authorize(method):
+                return
+
             safe_path = path.lstrip('/')
             file_path = os.path.join(self.server.static_dir, safe_path)
             
