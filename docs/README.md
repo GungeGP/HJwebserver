@@ -12,7 +12,8 @@ connection and login.
 | [WebServer reference](webserver.md) | Every method on the `app` object and its parameters |
 | [Routes & requests](routes.md) | Writing handlers, reading the request, sending responses |
 | [Database](database.md) | `setDatabase` backends, running your own queries |
-| [Authentication](auth.md) | How login works, protecting routes, managing users |
+| [Authentication](auth.md) | How login works, sessions, protecting routes |
+| [Managing users](users.md) | CLI and Python API for users, roles, passwords, lockouts |
 | [Frontend](frontend.md) | The injected scripts, the login overlay, logout button, `Notify` |
 
 ## Getting started
@@ -53,9 +54,11 @@ python -c "import secrets; print('JWT_SECRET=' + secrets.token_hex(32))" > .env
 
 and create at least one user (nobody can log in otherwise):
 
-```python
-app.createUser("alice", "correct-horse-battery")
+```bash
+python -m WebServer createuser alice --role admin
 ```
+
+(or `app.createUser("alice", "correct-horse-battery")` from Python — see [Managing users](users.md)).
 
 ### Project layout
 

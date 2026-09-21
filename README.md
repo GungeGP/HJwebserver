@@ -29,7 +29,8 @@ The wiki lives in [`docs/`](docs/README.md):
 - [WebServer reference](docs/webserver.md) - every method and parameter (`setDatabase`, `settings`, `route`, ...)
 - [Routes & requests](docs/routes.md) - handlers, `request.body`, `request.user`, sending responses
 - [Database](docs/database.md) - backends, drivers, running your own queries
-- [Authentication](docs/auth.md) - protecting routes, sessions, managing users
+- [Authentication](docs/auth.md) - protecting routes, sessions, roles
+- [Managing users](docs/users.md) - `python -m WebServer` CLI and the Python API
 - [Frontend](docs/frontend.md) - injected scripts, login overlay, logout button, `Notify`
 
 ## Install

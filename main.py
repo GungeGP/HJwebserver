@@ -10,8 +10,9 @@ app.setDatabase(type="mssql", server="localhost", dbName="workTime")
 app.addPath('/', 'public/index.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
-# Users are created from code (no self-registration). Returns False if the user already exists.
-# app.createUser("admin", "change-me-please")   # min 8 characters
+# Users are created by an admin, not by self-registration:
+#   python -m WebServer createuser admin --role admin
+# or from code:  app.createUser("admin", "change-me-please", role="admin")   # False if it already exists
 
 @app.route('POST', '/api/data')
 def data_route(request):

@@ -24,7 +24,7 @@ routes; `/api/data?id=5` matches `/api/data`.
 | Attribute | Type | Notes |
 |-----------|------|-------|
 | `request.body` | `dict` / `list` / `str` / `None` | For `POST`/`PUT` with `Content-Type: application/json` the body is parsed for you. Other content types give the raw text. `GET`/`DELETE` → `None`. Invalid JSON is rejected with `400` before your handler runs. |
-| `request.user` | `dict` / `None` | `{"username": "..."}` on protected routes when auth is on. `None` on public routes and when auth is off. |
+| `request.user` | `dict` / `None` | `{"username", "role", "mustChangePassword"}` on protected routes when auth is on. `None` on public routes and when auth is off. |
 | `request.path` | `str` | Full request path including the query string, e.g. `/api/data?id=5`. |
 | `request.headers` | mapping | HTTP headers, e.g. `request.headers.get('Content-Type')`. |
 | `request.command` | `str` | The HTTP method. |
@@ -94,8 +94,11 @@ runs. Change the limit with `app.max_body_bytes = ...` before `start()`.
 |-------|---------|
 | `GET /webserver.js` | Framework script injected into every HTML page |
 | `GET /auth.js` | Login overlay script (only when auth is on) |
+| `GET /api/login-config` | Login form text/options |
 | `POST /api/login` | Login, sets the session cookie |
 | `POST /api/logout` | Clears the session cookie |
+| `POST /api/logout-all` | Ends every session of the current user |
 | `GET /api/verify` | Returns the current user, or `401` |
+| `POST /api/change-password` | Lets the user change their own password |
 
 Don't register routes on these paths.

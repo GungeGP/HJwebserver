@@ -80,23 +80,42 @@ class WebHandler(BaseHTTPRequestHandler):
 
         resolve_user = getattr(self.server, 'resolve_user', None)
         user = resolve_user(self) if resolve_user else None
-        if user:
-            self.user = user
-            return True
-
-        # Browser navigation to a protected page gets the login shell; API
-        # calls get a JSON 401 that auth.js turns into the login overlay.
         wants_html = method == 'GET' and 'text/html' in self.headers.get('Accept', '')
-        self.send_response(401)
-        if wants_html and hasattr(self.server, 'login_shell_html'):
+
+        if not user:
+            # Browser navigation to a protected page gets the login shell; API
+            # calls get a JSON 401 that auth.js turns into the login overlay.
+            return self._deny(401, {"error": "Authentication required."}, login_shell=wants_html)
+
+        # A pending password change blocks everything except the routes that
+        # let the user complete it (verify / change-password / logout-all).
+        if user.get("mustChangePassword") and not getattr(handler_function, '_hj_allow_pending_password', False):
+            return self._deny(403, {"error": "password_change_required"}, login_shell=wants_html)
+
+        roles = getattr(handler_function, '_hj_roles', None)
+        if roles and user.get("role") not in roles:
+            return self._deny(403, {"error": "Forbidden: this requires role " + " or ".join(roles) + "."},
+                              login_shell=False, html=wants_html)
+
+        self.user = user
+        return True
+
+    def _deny(self, status, payload, login_shell=False, html=False):
+        self.send_response(status)
+        if login_shell and hasattr(self.server, 'login_shell_html'):
             self.send_header('Content-Type', 'text/html')
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             self.wfile.write(self.server.login_shell_html())
+        elif html:
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(f"<!DOCTYPE html><title>{status}</title><h1>{status}</h1><p>{payload.get('error', '')}</p>".encode('utf-8'))
         else:
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps({"error": "Authentication required."}).encode('utf-8'))
+            self.wfile.write(json.dumps(payload).encode('utf-8'))
         return False
 
     def handle_request(self, method):

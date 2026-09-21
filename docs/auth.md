@@ -19,7 +19,9 @@
    app.createUser("alice", "correct-horse-battery")   # returns False if alice already exists
    ```
 
-   Passwords must be at least 5 characters (`minPasswordLength`).
+   Passwords must be at least 5 characters (`minPasswordLength`). Usernames are
+   case-insensitive. See [Managing users](users.md) for the CLI, roles,
+   temporary passwords and disabling accounts.
 
 All options: [`settings(...)`](webserver.md#appsettingsauthnone-).
 
@@ -51,9 +53,12 @@ Once logged in, a protected handler can rely on `request.user`:
 ```python
 @app.route('GET', '/api/my-entries')
 def my_entries(request):
-    username = request.user["username"]
+    username = request.user["username"]     # also: ["role"], ["mustChangePassword"]
     ...
 ```
+
+Routes and pages can additionally require a role — `@app.route(..., roles=["admin"])`
+— in which case other users get `403`. See [Managing users → Roles](users.md#roles).
 
 `request.user` is `None` on public routes even if the visitor is logged in; use
 `app.checkAuth(request)` there if you need to know.
@@ -63,8 +68,9 @@ def my_entries(request):
 After `maxLoginAttempts` (default 5) failed logins for a username **or** from
 one IP address, further attempts get `429 Too Many Requests` with a
 `Retry-After` header for `lockoutMinutes` (default 15) — even with the correct
-password. The counter resets on a successful login. Lockouts are kept in
-memory and cleared when the server restarts.
+password. The counter resets on a successful login. Lockouts are stored in
+the `LoginAttempts` table, so they survive restarts and can be lifted from the
+CLI while the server is running.
 
 ### Getting a locked-out user back in
 
@@ -73,7 +79,7 @@ memory and cleared when the server restarts.
 | Wait | The `429` response says how long (`"Try again in 847 seconds"`, plus a `Retry-After` header). |
 | Unlock from Python | `app.unlock("alice")` — lifts her lockout and any IP lockout her attempts caused. `app.unlock(ip="10.0.0.5")` for an address, `app.unlock()` for everything. |
 | See who is locked | `app.getLockouts()` → `[{"type": "username", "value": "alice", "failures": 5, "remaining": 612}, ...]` |
-| Restart the server | Clears all lockouts (they are in memory). |
+| From the command line | `python -m WebServer unlock alice` (see [Managing users](users.md)). |
 
 Unlocking is recorded in the audit log as `lockout_cleared`.
 
@@ -82,10 +88,11 @@ so an attacker cannot discover valid usernames by timing.
 
 ## How a session works
 
-1. The browser posts `{"username", "password"}` to `POST /api/login`.
+1. The browser posts `{"username", "password", "rememberMe"}` to `POST /api/login`.
 2. The server checks the password against the stored hash and, if it matches,
    sets a cookie `hj_session=<signed token>` with `HttpOnly; SameSite=Strict`
-   and a lifetime of `tokenLifetimeHours`.
+   and a lifetime of `tokenLifetimeHours` — or `rememberMeDays` when the
+   "Remember me" box was ticked.
 3. Every later request from the browser carries the cookie automatically, so your
    own `fetch('/api/...')` calls need no special headers.
 4. `POST /api/logout` clears the cookie.
@@ -99,9 +106,11 @@ checks that the row still exists, which is what makes sessions revocable:
 | Action | Effect |
 |--------|--------|
 | `POST /api/logout` | that one session is deleted |
+| `POST /api/logout-all` | all of the user's sessions are deleted ("log out everywhere") |
+| user changes their password | every *other* session is deleted; the current one stays |
 | `app.revokeSessions(username)` | all of that user's sessions are deleted |
-| `app.setPassword(username, ...)` | all sessions revoked (the user must log in again) |
-| `app.deleteUser(username)` | user and sessions gone |
+| `app.setPassword(username, ...)` / `disableUser` / `deleteUser` | all sessions revoked |
+| idle for `idleTimeoutMinutes` (if set) | that session is deleted on its next request |
 | changing `JWT_SECRET` | every token becomes invalid |
 
 `app.getSessions(username)` lists a user's active sessions. Expired rows are
@@ -123,20 +132,32 @@ refuse the header entirely if only browsers will ever call the server.
 
 - Stored as salted scrypt hashes (`scrypt$<salt>$<hash>`) in `Users.PasswordHash`.
   The plaintext is never written.
-- `app.createUser(username, password)` and `app.setPassword(username, password)`
-  do the hashing. Don't insert into `Users` directly.
+- `app.createUser` / `app.setPassword` (and the CLI) do the hashing. Don't insert
+  into `Users` directly.
+- **Users change their own password** with the "Change password" form
+  (`POST /api/change-password` with `currentPassword` + `newPassword`). The
+  current password is required; other sessions are logged out.
+- **Temporary passwords:** an admin can mark a password as must-change
+  (`--temporary` / `mustChangePassword=True`). The user is forced through the
+  change-password form before anything else works.
 - Rows that still contain a plaintext password (from before hashing existed) are
   accepted on the next login and upgraded to a hash at that moment.
-- There is no self-registration endpoint and no "forgot password" flow; both are
-  handled from Python code by an admin.
+- There is no self-registration endpoint and no "forgot password" e-mail flow;
+  an admin resets passwords with `python -m WebServer setpassword <name> --temporary`.
 
 ## Framework routes
 
 | Route | Public | Body / response |
 |-------|--------|-----------------|
-| `POST /api/login` | yes | body `{"username", "password"}` → `200 {"valid": true, "token": ...}` + cookie, or `401` |
+| `GET /api/login-config` | yes | `{"title", "message", "logo", "rememberMe", "minPasswordLength"}` for the login form |
+| `POST /api/login` | yes | body `{"username", "password", "rememberMe"?}` → `200 {"valid": true, "token", "user"}` + cookie; `401` wrong; `403` disabled; `429` locked |
 | `POST /api/logout` | yes | clears the cookie → `200` |
-| `GET /api/verify` | no | `200 {"valid": true, "user": {...}}` or `401` |
+| `POST /api/logout-all` | no | revokes every session of the user → `200` |
+| `GET /api/verify` | no | `200 {"valid": true, "user": {"username", "role", "mustChangePassword"}}` or `401` |
+| `POST /api/change-password` | no | body `{"currentPassword", "newPassword"}` → `200`; `401` wrong current; `400` policy |
+
+While a password change is pending, every other protected route answers
+`403 {"error": "password_change_required"}`.
 
 ## HTTPS
 

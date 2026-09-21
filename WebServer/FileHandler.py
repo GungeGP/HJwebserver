@@ -17,7 +17,7 @@ def inject_js_scripts(content, urls):
         return content[:idx] + injection + content[idx:]
     return content + injection
 
-def handle_file_request(self, url_path, file_path, public=False):
+def handle_file_request(self, url_path, file_path, public=False, roles=None):
     safe_file_path = file_path.lstrip('/').lstrip('\\')
     absolute_path = os.path.join(self.base_dir, safe_file_path)
 
@@ -47,6 +47,7 @@ def handle_file_request(self, url_path, file_path, public=False):
             request.wfile.write(f"Framework Error: Could not find file at {absolute_path}".encode('utf-8'))
 
     automatic_handler._hj_public = bool(public)
+    automatic_handler._hj_roles = list(roles) if roles else None
 
     if 'GET' not in self.routes:
         self.routes['GET'] = {}

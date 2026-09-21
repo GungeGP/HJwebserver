@@ -40,36 +40,81 @@ connection failures.
 
 Present only when `settings(auth=True)`. On page load it:
 
-1. Adds a hidden full-screen login form to the page.
-2. Calls `GET /api/verify`. If that fails, the overlay is shown; otherwise it stays hidden.
-3. Wraps `window.fetch`: if any of *your* API calls returns `401` (session
-   expired), the overlay pops up again. Your code doesn't need to handle that.
+1. Fetches `/api/login-config` (title, message, logo, whether "Remember me" is on)
+   and `/api/verify` in parallel, and builds a hidden overlay with two forms:
+   **login** and **change password**.
+2. If the session is valid the overlay stays hidden — unless the account has a
+   temporary password, in which case the change-password form is shown and
+   cannot be dismissed.
+3. Wraps `window.fetch`: a `401` from any of *your* API calls re-shows the login
+   form; a `403 password_change_required` shows the change-password form.
+4. Fires `hj:ready` on `window` once, with the user (or `null`).
 
-On a successful login the page reloads, so the server can send the protected
-content it withheld earlier.
+On a successful login or password change the page reloads, so the server can
+send the protected content it withheld earlier.
 
-### Adding a logout button
+### Knowing who is logged in
 
-Give any element `id="logout"`:
+```js
+window.addEventListener('hj:ready', (e) => {
+    const user = e.detail.user;          // {username, role, mustChangePassword} or null
+    if (user) { header.textContent = `Hi ${user.username}`; }
+    if (user?.role === 'admin') { adminPanel.hidden = false; }
+});
+```
+
+`window.currentUser` holds the same object after `hj:ready` has fired. Hiding
+an element in the page is cosmetic only — the server still enforces `roles=`
+on the routes behind it.
+
+### Buttons that just work
+
+Give any element one of these ids and `auth.js` wires it up:
+
+| id | Action |
+|----|--------|
+| `logout` | `POST /api/logout`, then reload |
+| `logout-all` | `POST /api/logout-all` (every device), then reload |
+| `change-password` | opens the change-password form (with a Cancel button) |
 
 ```html
+<button id="change-password">Change password</button>
 <button id="logout">Log out</button>
 ```
 
-`auth.js` wires it to `POST /api/logout` followed by a reload. Alternatively
-call the global `logout()` function yourself.
+### `window.hjAuth`
 
-### Styling the overlay
+For your own code:
 
-The form's ids and classes are stable, so a stylesheet in your page can restyle it:
+```js
+hjAuth.user                          // same as window.currentUser
+await hjAuth.logout()                // reloads
+await hjAuth.logoutEverywhere()      // reloads
+hjAuth.showChangePassword()          // opens the form
+hjAuth.showLogin()                   // opens the login form
+const { ok, error } = await hjAuth.changePassword(current, next)   // no reload; error is a message or null
+```
+
+### Customising the form
+
+Text, message and logo come from the server:
+
+```python
+app.settings(auth=True, loginTitle="WorkTime", loginMessage="Sign in with your company account", loginLogo="/logo.png")
+```
+
+(`loginLogo` must be served publicly — `app.addPath('/logo.png', 'public/logo.png', public=True)`.)
+
+For styling, the ids and classes are stable:
 
 | Selector | Element |
 |----------|---------|
 | `#login-overlay` | full-screen dimmed backdrop |
 | `.login-box` | the white card |
-| `#login-form` | the `<form>` |
-| `#username`, `#password` | the inputs |
-| `#login-btn` | the submit button (disabled until both fields are filled) |
+| `#login-form`, `#change-form` | the two `<form>`s |
+| `#username`, `#password`, `#remember-me` | login inputs |
+| `#current-password`, `#new-password`, `#confirm-password` | change-password inputs |
+| `#login-btn`, `#change-btn`, `#change-cancel` | buttons |
 
 Your page's CSS loads before the injected script's inline styles, so use
 slightly more specific selectors (e.g. `body #login-btn`) or `!important` to win.

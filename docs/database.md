@@ -27,14 +27,17 @@ one you use installed.
 By default `setDatabase` creates these if they are missing (`createTables=False` skips it):
 
 ```
-Users            (Id, Username, PasswordHash)
-Sessions         (Jti, Username, CreatedAt, ExpiresAt)
+Users            (Id, Username, PasswordHash, Role, Disabled, MustChangePassword)
+Sessions         (Jti, Username, CreatedAt, ExpiresAt, LastSeen)
+LoginAttempts    (AttemptKey, FailCount, LastAt, LockedUntil, LastUser)
 AuditLog         (Id, At, Username, Event, Detail, Ip)
 WorkTimeEntries  (Id, Username, WorkDate, StartTime, EndTime)
 ```
 
-The first three are used by the login system. All statements are "create if
-not exists", so existing tables are never altered.
+The first four are used by the login system. Tables are created only if
+missing; columns added by newer versions (`Role`, `Disabled`, ... ) are added to
+existing tables with `ALTER TABLE ... ADD`, so a database from an older version
+keeps working. Nothing is ever dropped or renamed.
 
 ## Your own queries
 

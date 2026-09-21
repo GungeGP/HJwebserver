@@ -156,7 +156,10 @@ _SCHEMA = {
         CREATE TABLE IF NOT EXISTS Users (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             Username TEXT NOT NULL UNIQUE,
-            PasswordHash TEXT
+            PasswordHash TEXT,
+            Role TEXT NOT NULL DEFAULT 'user',
+            Disabled INTEGER NOT NULL DEFAULT 0,
+            MustChangePassword INTEGER NOT NULL DEFAULT 0
         )
         """,
         """
@@ -173,7 +176,17 @@ _SCHEMA = {
             Jti TEXT PRIMARY KEY,
             Username TEXT NOT NULL,
             CreatedAt INTEGER NOT NULL,
-            ExpiresAt INTEGER NOT NULL
+            ExpiresAt INTEGER NOT NULL,
+            LastSeen INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LoginAttempts (
+            AttemptKey TEXT PRIMARY KEY,
+            FailCount INTEGER NOT NULL,
+            LastAt INTEGER NOT NULL,
+            LockedUntil INTEGER NOT NULL,
+            LastUser TEXT
         )
         """,
         """
@@ -193,7 +206,10 @@ _SCHEMA = {
         CREATE TABLE Users (
             Id INT IDENTITY(1,1) PRIMARY KEY,
             Username NVARCHAR(255) NOT NULL UNIQUE,
-            PasswordHash NVARCHAR(255) NULL
+            PasswordHash NVARCHAR(255) NULL,
+            Role NVARCHAR(32) NOT NULL DEFAULT 'user',
+            Disabled BIT NOT NULL DEFAULT 0,
+            MustChangePassword BIT NOT NULL DEFAULT 0
         )
         """,
         """
@@ -212,7 +228,18 @@ _SCHEMA = {
             Jti NVARCHAR(64) PRIMARY KEY,
             Username NVARCHAR(255) NOT NULL,
             CreatedAt BIGINT NOT NULL,
-            ExpiresAt BIGINT NOT NULL
+            ExpiresAt BIGINT NOT NULL,
+            LastSeen BIGINT NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        IF OBJECT_ID('LoginAttempts', 'U') IS NULL
+        CREATE TABLE LoginAttempts (
+            AttemptKey NVARCHAR(255) PRIMARY KEY,
+            FailCount INT NOT NULL,
+            LastAt BIGINT NOT NULL,
+            LockedUntil BIGINT NOT NULL,
+            LastUser NVARCHAR(255) NULL
         )
         """,
         """
@@ -232,7 +259,10 @@ _SCHEMA = {
         CREATE TABLE IF NOT EXISTS Users (
             Id INT AUTO_INCREMENT PRIMARY KEY,
             Username VARCHAR(255) NOT NULL UNIQUE,
-            PasswordHash VARCHAR(255) NULL
+            PasswordHash VARCHAR(255) NULL,
+            Role VARCHAR(32) NOT NULL DEFAULT 'user',
+            Disabled TINYINT NOT NULL DEFAULT 0,
+            MustChangePassword TINYINT NOT NULL DEFAULT 0
         )
         """,
         """
@@ -249,7 +279,17 @@ _SCHEMA = {
             Jti VARCHAR(64) PRIMARY KEY,
             Username VARCHAR(255) NOT NULL,
             CreatedAt BIGINT NOT NULL,
-            ExpiresAt BIGINT NOT NULL
+            ExpiresAt BIGINT NOT NULL,
+            LastSeen BIGINT NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LoginAttempts (
+            AttemptKey VARCHAR(255) PRIMARY KEY,
+            FailCount INT NOT NULL,
+            LastAt BIGINT NOT NULL,
+            LockedUntil BIGINT NOT NULL,
+            LastUser VARCHAR(255) NULL
         )
         """,
         """
@@ -266,10 +306,57 @@ _SCHEMA = {
 }
 
 
+# Columns added after the first release. (table, column) -> DDL fragment per dialect.
+# Applied by create_tables() so databases created by older versions keep working.
+_MIGRATIONS = [
+    ("Users", "Role", {
+        "sqlite": "TEXT NOT NULL DEFAULT 'user'",
+        "mssql": "NVARCHAR(32) NOT NULL DEFAULT 'user'",
+        "mysql": "VARCHAR(32) NOT NULL DEFAULT 'user'",
+    }),
+    ("Users", "Disabled", {
+        "sqlite": "INTEGER NOT NULL DEFAULT 0",
+        "mssql": "BIT NOT NULL DEFAULT 0",
+        "mysql": "TINYINT NOT NULL DEFAULT 0",
+    }),
+    ("Users", "MustChangePassword", {
+        "sqlite": "INTEGER NOT NULL DEFAULT 0",
+        "mssql": "BIT NOT NULL DEFAULT 0",
+        "mysql": "TINYINT NOT NULL DEFAULT 0",
+    }),
+    ("Sessions", "LastSeen", {
+        "sqlite": "INTEGER NOT NULL DEFAULT 0",
+        "mssql": "BIGINT NOT NULL DEFAULT 0",
+        "mysql": "BIGINT NOT NULL DEFAULT 0",
+    }),
+]
+
+
+def _column_exists(table, column):
+    db_type = _config["type"]
+    if db_type == "sqlite":
+        return any(r.name.lower() == column.lower() for r in fetch_all(f"PRAGMA table_info({table})"))
+    if db_type == "mssql":
+        row = fetch_one("SELECT COL_LENGTH(?, ?) AS L", (table, column))
+        return row is not None and row.L is not None
+    if db_type == "mysql":
+        row = fetch_one(
+            "SELECT COUNT(*) AS N FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+            (table, column))
+        return bool(row and row.N)
+    return True
+
+
 def create_tables():
-    """Create the framework tables (Users, WorkTimeEntries, Sessions, AuditLog) if missing."""
+    """Create the framework tables (Users, Sessions, AuditLog, WorkTimeEntries) if missing,
+    and add any columns introduced by newer versions to existing tables."""
     for statement in _SCHEMA[_config["type"]]:
         execute(statement)
+    keyword = "ADD COLUMN" if _config["type"] in ("sqlite", "mysql") else "ADD"
+    for table, column, ddl in _MIGRATIONS:
+        if not _column_exists(table, column):
+            execute(f"ALTER TABLE {table} {keyword} {column} {ddl[_config['type']]}")
 
 
 # ---------------------------------------------------------------------------
@@ -284,23 +371,37 @@ def save_work_time(username, work_date, start_time, end_time):
     execute(sql, (username, work_date, start_time, end_time))
 
 
+_USER_COLUMNS = "Username, PasswordHash, Role, Disabled, MustChangePassword"
+
+
 def get_user_by_username(username):
-    sql = "SELECT Username, PasswordHash FROM Users WHERE Username = ?"
-    return fetch_one(sql, (username,))
+    return fetch_one(f"SELECT {_USER_COLUMNS} FROM Users WHERE Username = ?", (username,))
 
 
-def create_user(username, password_hash):
+def get_all_users():
+    return fetch_all(f"SELECT {_USER_COLUMNS} FROM Users ORDER BY Username")
+
+
+def create_user(username, password_hash, role="user", must_change_password=False):
     sql = """
-    INSERT INTO Users (Username, PasswordHash)
-    VALUES (?, ?)
+    INSERT INTO Users (Username, PasswordHash, Role, Disabled, MustChangePassword)
+    VALUES (?, ?, ?, 0, ?)
     """
-    execute(sql, (username, password_hash))
+    execute(sql, (username, password_hash, role, 1 if must_change_password else 0))
     return username
 
 
-def update_user_password(username, password_hash):
-    sql = "UPDATE Users SET PasswordHash = ? WHERE Username = ?"
-    execute(sql, (password_hash, username))
+def update_user_password(username, password_hash, must_change_password=False):
+    execute("UPDATE Users SET PasswordHash = ?, MustChangePassword = ? WHERE Username = ?",
+            (password_hash, 1 if must_change_password else 0, username))
+
+
+def set_user_role(username, role):
+    execute("UPDATE Users SET Role = ? WHERE Username = ?", (role, username))
+
+
+def set_user_disabled(username, disabled):
+    execute("UPDATE Users SET Disabled = ? WHERE Username = ?", (1 if disabled else 0, username))
 
 
 def delete_user(username):
@@ -310,12 +411,20 @@ def delete_user(username):
 # --- Sessions -------------------------------------------------------------
 
 def create_session(jti, username, created_at, expires_at):
-    execute("INSERT INTO Sessions (Jti, Username, CreatedAt, ExpiresAt) VALUES (?, ?, ?, ?)",
-            (jti, username, int(created_at), int(expires_at)))
+    execute("INSERT INTO Sessions (Jti, Username, CreatedAt, ExpiresAt, LastSeen) VALUES (?, ?, ?, ?, ?)",
+            (jti, username, int(created_at), int(expires_at), int(created_at)))
 
 
 def get_session(jti):
-    return fetch_one("SELECT Jti, Username, CreatedAt, ExpiresAt FROM Sessions WHERE Jti = ?", (jti,))
+    return fetch_one("SELECT Jti, Username, CreatedAt, ExpiresAt, LastSeen FROM Sessions WHERE Jti = ?", (jti,))
+
+
+def touch_session(jti, now):
+    execute("UPDATE Sessions SET LastSeen = ? WHERE Jti = ?", (int(now), jti))
+
+
+def delete_other_sessions(username, keep_jti):
+    execute("DELETE FROM Sessions WHERE Username = ? AND Jti <> ?", (username, keep_jti))
 
 
 def delete_session(jti):
@@ -331,8 +440,43 @@ def delete_expired_sessions(now):
 
 
 def get_sessions_for_user(username):
-    return fetch_all("SELECT Jti, Username, CreatedAt, ExpiresAt FROM Sessions WHERE Username = ? ORDER BY CreatedAt DESC",
+    return fetch_all("SELECT Jti, Username, CreatedAt, ExpiresAt, LastSeen FROM Sessions WHERE Username = ? ORDER BY CreatedAt DESC",
                      (username,))
+
+
+# --- Login attempts / lockouts --------------------------------------------
+
+def get_login_attempt(key):
+    return fetch_one("SELECT AttemptKey, FailCount, LastAt, LockedUntil, LastUser FROM LoginAttempts WHERE AttemptKey = ?", (key,))
+
+
+def save_login_attempt(key, fail_count, last_at, locked_until, last_user):
+    if get_login_attempt(key) is None:
+        execute("INSERT INTO LoginAttempts (AttemptKey, FailCount, LastAt, LockedUntil, LastUser) VALUES (?, ?, ?, ?, ?)",
+                (key, int(fail_count), int(last_at), int(locked_until), last_user))
+    else:
+        execute("UPDATE LoginAttempts SET FailCount = ?, LastAt = ?, LockedUntil = ?, LastUser = ? WHERE AttemptKey = ?",
+                (int(fail_count), int(last_at), int(locked_until), last_user, key))
+
+
+def delete_login_attempt(key):
+    execute("DELETE FROM LoginAttempts WHERE AttemptKey = ?", (key,))
+
+
+def delete_login_attempts_by_user(last_user):
+    execute("DELETE FROM LoginAttempts WHERE LastUser = ? AND AttemptKey LIKE 'ip:%'", (last_user,))
+
+
+def delete_all_login_attempts():
+    execute("DELETE FROM LoginAttempts")
+
+
+def get_locked_attempts(now):
+    return fetch_all("SELECT AttemptKey, FailCount, LastAt, LockedUntil, LastUser FROM LoginAttempts WHERE LockedUntil > ?", (int(now),))
+
+
+def delete_stale_login_attempts(before):
+    execute("DELETE FROM LoginAttempts WHERE LastAt < ? AND LockedUntil < ?", (int(before), int(before)))
 
 
 # --- Audit log ------------------------------------------------------------

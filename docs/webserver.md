@@ -61,7 +61,9 @@ app.settings(auth=True, tokenLifetimeHours=8, maxLoginAttempts=3)
 |-----------|---------|---------|
 | `auth` | `None` | `True` enables login. **Every route and page then requires login** unless registered with `public=True`. |
 | `jwtSecret` | `None` | Secret used to sign sessions, at least 32 bytes. Defaults to `JWT_SECRET` from `.env`. Missing or too short → `RuntimeError` at startup. |
-| `tokenLifetimeHours` | `24` | How long a login stays valid before the user has to sign in again. |
+| `tokenLifetimeHours` | `24` | How long a normal login stays valid. |
+| `rememberMeDays` | `30` | Lifetime when the user ticks "Remember me". `0` hides the checkbox. |
+| `idleTimeoutMinutes` | `0` | Log out sessions with no request for this long. `0` = off. |
 | `secureCookie` | `False` | Add the `Secure` flag to the session cookie. Turned on automatically by `useHttps()`. |
 | `bearerTokens` | `True` | Also accept `Authorization: Bearer <token>` (for scripts). `False` = cookie only. |
 | `maxLoginAttempts` | `5` | Failed logins (per username *and* per IP) before a lockout. |
@@ -71,6 +73,12 @@ app.settings(auth=True, tokenLifetimeHours=8, maxLoginAttempts=3)
 | `trustProxy` | `False` | Take the client IP from `X-Forwarded-For`. Only set behind a reverse proxy you control. |
 | `csp` | a default policy | `Content-Security-Policy` header value. `None` sends none. See [Authentication → Security headers](auth.md#security-headers). |
 | `securityHeaders` | `True` | Send `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, CSP (and HSTS on HTTPS). |
+| `loginTitle` | `"Access Restricted"` | Heading on the login form. |
+| `loginMessage` | `"Please log in to continue."` | Text under the heading. |
+| `loginLogo` | `None` | URL of an image shown above the form, e.g. `"/logo.png"`. |
+| `loginTitle` | `"Access Restricted"` | Heading on the login form. |
+| `loginMessage` | `"Please log in to continue."` | Text under the heading. |
+| `loginLogo` | `None` | URL of an image shown above the form, e.g. `"/logo.png"`. |
 
 Calling `settings()` without `auth=True` (or not at all) leaves the server fully open.
 
@@ -108,7 +116,7 @@ Raises `FileNotFoundError` if either file is missing.
 
 ---
 
-## `app.addPath(url_path, file_path, public=False)`
+## `app.addPath(url_path, file_path, public=False, roles=None)`
 
 Serve one file at a fixed URL.
 
@@ -117,10 +125,12 @@ Serve one file at a fixed URL.
 | `url_path` | URL to respond on, e.g. `'/'` or `'/report'`. |
 | `file_path` | File to send, relative to the project root, e.g. `'public/index.html'`. |
 | `public` | When auth is on: `True` makes this page viewable without login. |
+| `roles` | List of roles allowed to view it, e.g. `["admin"]`. Others get `403`. |
 
 ```python
 app.addPath('/', 'public/index.html')
 app.addPath('/about', 'public/about.html', public=True)
+app.addPath('/admin', 'public/admin.html', roles=["admin"])
 ```
 
 HTML files get the framework scripts injected. Other files are sent as-is with a
@@ -128,7 +138,7 @@ content type guessed from the extension.
 
 ---
 
-## `@app.route(method, path, public=False)`
+## `@app.route(method, path, public=False, roles=None)`
 
 Register a handler function for a URL. See [Routes & requests](routes.md).
 
@@ -137,10 +147,15 @@ Register a handler function for a URL. See [Routes & requests](routes.md).
 | `method` | `'GET'`, `'POST'`, `'PUT'` or `'DELETE'`. |
 | `path` | Exact URL path, e.g. `'/api/data'`. Query strings are ignored for matching. |
 | `public` | When auth is on: `True` lets anyone call this route. |
+| `roles` | List of roles allowed to call it, e.g. `["admin"]`. Others get `403`. |
 
 ```python
 @app.route('POST', '/api/data')
 def save(request):
+    ...
+
+@app.route('DELETE', '/api/users', roles=["admin"])
+def remove(request):
     ...
 ```
 
@@ -149,48 +164,24 @@ response itself (see [Routes & requests](routes.md#sending-a-response)).
 
 ---
 
-## `app.createUser(username, password)`
+## User management
 
-Create a login. The password is hashed before it is stored.
+All of these are also available as `python -m WebServer <command>`; see
+[Managing users](users.md) for the full story.
 
-| Returns | Meaning |
-|---------|---------|
-| `True` | User created. |
-| `False` | Username already exists; nothing changed. |
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `createUser(username, password, role="user", mustChangePassword=False)` | `True` / `False` if exists | Hashes the password. `ValueError` if shorter than `minPasswordLength`. |
+| `setPassword(username, password, mustChangePassword=False)` | `True` / `False` if no user | Logs the user out everywhere. `mustChangePassword=True` = temporary password. |
+| `setRole(username, role)` | `True` / `False` | Effective on the user's next request. |
+| `disableUser(username)` / `enableUser(username)` | `True` / `False` | Disable blocks login and ends sessions; the row is kept. |
+| `deleteUser(username)` | `True` / `False` | Removes user and sessions. |
+| `getUser(username)` | dict or `None` | `{"username", "role", "disabled", "mustChangePassword"}` |
+| `listUsers()` | list of dicts | Same shape, sorted by name. |
+| `revokeSessions(username)` | – | Log a user out of every browser/device. |
+| `getSessions(username)` | list of rows | `Jti`, `CreatedAt`, `LastSeen`, `ExpiresAt` (epoch seconds). |
 
-Raises `ValueError` if the username is empty or the password is shorter than
-`minPasswordLength` (default 5). Requires `setDatabase` first.
-
-```python
-app.createUser("alice", "correct-horse-battery")
-```
-
-Safe to leave in `main.py`: on later runs it just returns `False`.
-
----
-
-## `app.setPassword(username, password)`
-
-Replace a user's password (hashed) and log them out everywhere.
-
-| Returns | Meaning |
-|---------|---------|
-| `True` | Password updated, all sessions revoked. |
-| `False` | No such user. |
-
-Raises `ValueError` if the password is shorter than `minPasswordLength`.
-
----
-
-## `app.deleteUser(username)`
-
-Remove the user and all their sessions. Returns `True`, or `False` if no such user.
-
----
-
-## `app.revokeSessions(username)`
-
-Log a user out of every browser and device immediately. Their next request gets `401`.
+Usernames are case-insensitive (stored lower-case).
 
 ---
 
