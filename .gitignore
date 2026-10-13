@@ -1,5 +1,55 @@
+# Environment / secrets
 .env
+.env.local
+.env.*.local
+!.env.example
+
+# Byte-compiled / cache
 __pycache__/
-*.pyc
-/__pycache__
+*.py[cod]
+*$py.class
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Databases
 *.db
+*.sqlite
+*.sqlite3
+
+# Certs / keys
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
