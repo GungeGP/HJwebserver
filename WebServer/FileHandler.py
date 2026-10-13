@@ -1,23 +1,8 @@
 import mimetypes
 import os
 
-from WebServer.includes import process_includes
+from WebServer.page import inject_js_scripts, process_includes
 
-
-def inject_js_scripts(content, urls):
-    if not urls:
-        return content
-
-    injections = [f'<script src="{url}"></script>'.encode('utf-8') for url in urls if url]
-    if not injections:
-        return content
-
-    injection = b''.join(injections)
-    lower = content.lower()
-    idx = lower.rfind(b'</body>')
-    if idx != -1:
-        return content[:idx] + injection + content[idx:]
-    return content + injection
 
 def handle_file_request(self, url_path, file_path, public=False, roles=None):
     safe_file_path = file_path.lstrip('/').lstrip('\\')

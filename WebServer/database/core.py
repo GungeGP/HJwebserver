@@ -1,6 +1,6 @@
 """Connection handling, execute/fetch primitives, and schema/migrations.
 
-Shared foundation for WebServer.database.auth and WebServer.database.tableview
+Shared foundation for WebServer.database.auth and WebServer.database.tableviewer
 - neither domain owns the connection itself.
 """
 

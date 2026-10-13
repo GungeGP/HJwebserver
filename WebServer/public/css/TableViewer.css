@@ -36,7 +36,16 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
 .tableviewer-actions-col { width: 1%; white-space: nowrap; }
 .tableviewer-edit-btn {
     padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px;
-    background: #f6f8fa; color: #8c959f; font-size: 13px; cursor: not-allowed;
+    background: #fff; color: #1f2328; font-size: 13px; cursor: pointer;
+}
+.tableviewer-edit-btn:hover:not(:disabled) { background: #f6f8fa; }
+.tableviewer-edit-btn:disabled { background: #f6f8fa; color: #8c959f; cursor: not-allowed; }
+.tableviewer-save-btn { border-color: #1a7f37; color: #1a7f37; }
+.tableviewer-save-btn:hover:not(:disabled) { background: #dafbe1; }
+.tableviewer-cancel-btn { margin-left: 6px; }
+.tableviewer-edit-input {
+    width: 100%; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
+    border: 1px solid #0969da; border-radius: 4px; font-family: inherit;
 }
 .tableviewer-pagination {
     flex: 0 0 auto;
@@ -63,7 +72,12 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
     table.tableviewer th.tableviewer-sortable:hover { background: #1c2128; }
     table.tableviewer tbody tr:nth-child(even) { background: #161b22; }
     table.tableviewer tbody tr:hover { background: #122033; }
-    .tableviewer-edit-btn { background: #161b22; border-color: #30363d; color: #6e7681; }
+    .tableviewer-edit-btn { background: #0d1117; border-color: #30363d; color: #e6edf3; }
+    .tableviewer-edit-btn:hover:not(:disabled) { background: #161b22; }
+    .tableviewer-edit-btn:disabled { background: #161b22; color: #6e7681; }
+    .tableviewer-save-btn { border-color: #3fb950; color: #3fb950; }
+    .tableviewer-save-btn:hover:not(:disabled) { background: #0d2b1a; }
+    .tableviewer-edit-input { background: #0d1117; color: #e6edf3; border-color: #388bfd; }
     .tableviewer-page-btn { background: #0d1117; border-color: #30363d; color: #e6edf3; }
     .tableviewer-page-btn:hover:not(:disabled) { background: #161b22; }
     .tableviewer-error { background: #2d1210; border-color: #58221c; color: #ff9492; }

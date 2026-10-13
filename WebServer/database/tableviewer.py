@@ -117,3 +117,57 @@ def get_table_page(table, page=1, per_page=40, search=None, sort=None, sort_dir=
     rows = fetch_all(sql, params + [offset, per_page] if db_type == "mssql" else params + [per_page, offset])
 
     return [vars(row) for row in rows], total, column_names
+
+
+def get_primary_key_columns(table):
+    """Primary key column name(s) of `table`, in key order. Empty list if the
+    table has no primary key - TableViewer disables editing in that case,
+    since there'd be no safe way to identify which row to update.
+    """
+    if table not in get_table_names():
+        raise ValueError(f"Unknown table '{table}'")
+
+    db_type = get_database_type()
+    if db_type == "sqlite":
+        rows = fetch_all(f"PRAGMA table_info({table})")
+        return [r.name for r in sorted((r for r in rows if r.pk), key=lambda r: r.pk)]
+    if db_type == "mssql":
+        rows = fetch_all(
+            "SELECT ku.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc "
+            "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku "
+            "  ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME AND tc.TABLE_NAME = ku.TABLE_NAME "
+            "WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_NAME = ? "
+            "ORDER BY ku.ORDINAL_POSITION", (table,))
+        return [r.COLUMN_NAME for r in rows]
+    if db_type == "mysql":
+        rows = fetch_all(
+            "SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = 'PRIMARY' "
+            "ORDER BY ORDINAL_POSITION", (table,))
+        return [r.COLUMN_NAME for r in rows]
+    return []
+
+
+def update_table_row(table, pk_values, changes):
+    """Update one row of `table`, identified by pk_values ({column: value} for
+    every primary key column), setting the columns named in changes.
+
+    Raises ValueError if: the table has no primary key, pk_values doesn't
+    cover exactly that key, or changes is empty once unknown columns and the
+    primary key itself (never editable through this call) are filtered out.
+    """
+    column_names = {c["name"] for c in get_table_columns(table)}
+    pk_cols = get_primary_key_columns(table)
+    if not pk_cols:
+        raise ValueError(f"Table '{table}' has no primary key; rows can't be edited")
+    if set(pk_values) != set(pk_cols):
+        raise ValueError(f"Expected primary key column(s): {', '.join(pk_cols)}")
+
+    changes = {k: v for k, v in changes.items() if k in column_names and k not in pk_cols}
+    if not changes:
+        raise ValueError("No editable columns in the request")
+
+    set_clause = ", ".join(f"{col} = ?" for col in changes)
+    where_clause = " AND ".join(f"{col} = ?" for col in pk_cols)
+    params = list(changes.values()) + [pk_values[col] for col in pk_cols]
+    execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}", params)

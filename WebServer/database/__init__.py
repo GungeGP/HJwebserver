@@ -11,9 +11,9 @@ to the driver's native style automatically. Rows returned from queries expose
 columns as attributes (``row.Username``) regardless of the backend.
 
 This is a package, split by concern:
-  * ``core``      - connection handling, execute/fetch primitives, schema/migrations
-  * ``auth``      - Users, Sessions, LoginAttempts, AuditLog queries (used by WebServer.auth)
-  * ``tableview`` - generic table introspection backing WebServer.addTableViewer
+  * ``core``        - connection handling, execute/fetch primitives, schema/migrations
+  * ``auth``        - Users, Sessions, LoginAttempts, AuditLog queries (used by WebServer.auth)
+  * ``tableviewer`` - generic table introspection backing WebServer.addTableViewer
 
 Everything below is re-exported here so existing code can keep doing
 ``from WebServer.database import get_user_by_username`` etc. without caring
@@ -59,9 +59,11 @@ from WebServer.database.auth import (
     get_audit_log,
 )
 
-from WebServer.database.tableview import (
+from WebServer.database.tableviewer import (
     get_table_names,
     get_table_columns,
     get_table_rows,
     get_table_page,
+    get_primary_key_columns,
+    update_table_row,
 )

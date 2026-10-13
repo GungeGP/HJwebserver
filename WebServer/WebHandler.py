@@ -4,23 +4,11 @@ import mimetypes
 import os
 from urllib.parse import urlparse
 
-from WebServer.includes import process_includes
+from WebServer.page import inject_js_scripts, process_includes
 
 # Largest request body a route will accept (override with WebServer(...).max_body_bytes).
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
-
-def inject_js_scripts(content, urls):
-    if not urls:
-        return content
-
-    injections = [f'<script src="{url}"></script>'.encode('utf-8') for url in urls]
-    injection = b''.join(injections)
-    lower = content.lower()
-    idx = lower.rfind(b'</body>')
-    if idx != -1:
-        return content[:idx] + injection + content[idx:]
-    return content + injection
 
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""

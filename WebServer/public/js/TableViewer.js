@@ -36,6 +36,7 @@ class TableViewer {
         this.columns = [];
         this.total = 0;
         this.totalPages = 1;
+        this.primaryKey = [];
         this._searchTimer = null;
         this._paginated = Boolean(this.url);
 
@@ -105,6 +106,7 @@ class TableViewer {
             this.total = data.total ?? this.rows.length;
             this.totalPages = data.totalPages ?? 1;
             this.page = data.page ?? this.page;
+            this.primaryKey = data.primaryKey || [];
 
             this.errorEl.hidden = true;
             this.scrollEl.hidden = false;
@@ -158,6 +160,7 @@ class TableViewer {
         });
         const actionsHead = document.createElement('th');
         actionsHead.className = 'tableviewer-actions-col';
+        actionsHead.textContent = 'Actions';
         headRow.appendChild(actionsHead);
 
         const body = this.tableEl.createTBody();
@@ -169,11 +172,15 @@ class TableViewer {
             return;
         }
 
+        const canEdit = this._paginated && this.primaryKey.length > 0;
+
         this.rows.forEach(row => {
             const tr = body.insertRow();
             this.columns.forEach(name => {
                 const value = row[name];
-                tr.insertCell().textContent = value === null || value === undefined ? '' : String(value);
+                const cell = tr.insertCell();
+                cell.textContent = value === null || value === undefined ? '' : String(value);
+                cell.dataset.column = name;
             });
 
             const actionCell = tr.insertCell();
@@ -182,9 +189,83 @@ class TableViewer {
             editBtn.type = 'button';
             editBtn.className = 'tableviewer-edit-btn';
             editBtn.textContent = 'Edit';
-            editBtn.disabled = true; // placeholder - wired up once row editing ships
+            editBtn.disabled = !canEdit;
+            if (!canEdit && this._paginated) {
+                editBtn.title = "This table has no primary key, so rows can't be edited safely.";
+            }
+            if (canEdit) {
+                editBtn.addEventListener('click', () => this._beginRowEdit(tr, row));
+            }
             actionCell.appendChild(editBtn);
         });
+    }
+
+    /** Swap one row into edit mode: text cells become inputs, Edit becomes Save/Cancel. */
+    _beginRowEdit(tr, row) {
+        const cells = Array.from(tr.cells);
+        const inputs = {};
+
+        this.columns.forEach((name, i) => {
+            if (this.primaryKey.includes(name)) return; // the key itself isn't editable
+            const cell = cells[i];
+            const value = row[name];
+            cell.textContent = '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'tableviewer-edit-input';
+            input.value = value === null || value === undefined ? '' : String(value);
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); save(); }
+                if (e.key === 'Escape') { e.preventDefault(); this._renderTable(); }
+            });
+            cell.appendChild(input);
+            inputs[name] = input;
+        });
+
+        const actionCell = cells[cells.length - 1];
+        actionCell.innerHTML = '';
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'tableviewer-edit-btn tableviewer-save-btn';
+        saveBtn.textContent = 'Save';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'tableviewer-edit-btn tableviewer-cancel-btn';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => this._renderTable());
+
+        const save = () => this._saveRowEdit(row, inputs, saveBtn, cancelBtn);
+        saveBtn.addEventListener('click', save);
+
+        actionCell.append(saveBtn, cancelBtn);
+        Object.values(inputs)[0]?.focus();
+    }
+
+    async _saveRowEdit(row, inputs, saveBtn, cancelBtn) {
+        saveBtn.disabled = true;
+        cancelBtn.disabled = true;
+
+        const pk = {};
+        this.primaryKey.forEach(name => { pk[name] = row[name]; });
+        const values = {};
+        Object.entries(inputs).forEach(([name, input]) => { values[name] = input.value; });
+
+        try {
+            const res = await fetch(this.url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pk, values }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+            this.errorEl.hidden = true;
+            await this.load(); // refresh this page from the server
+        } catch (err) {
+            this.errorEl.textContent = `Could not save: ${err.message}`;
+            this.errorEl.hidden = false;
+            this._renderTable(); // revert this row back to display mode
+        }
     }
 
     _renderPagination() {
