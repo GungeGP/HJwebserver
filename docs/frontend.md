@@ -6,14 +6,18 @@ Every HTML file the framework serves (via `addPath` or from `public/`) gets thes
 tags inserted just before `</body>`:
 
 ```html
-<script src="/webserver.js?v=…"></script>
-<script src="/auth.js?v=…"></script>   <!-- only when auth is on -->
+<script src="/js/webserver.js?v=…"></script>
+<script src="/js/auth.js?v=…"></script>   <!-- only when auth is on -->
+<script src="/js/TableViewer.js?v=…"></script>   <!-- only once addTableViewer() is used -->
 ```
 
 The `?v=` value changes whenever the file changes, so browsers never use a stale copy.
 
-You can override either script by putting your own `webserver.js` or `auth.js` in
-your `public/` folder; the framework serves yours instead of its bundled copy.
+You can override any of these by putting your own copy at the same relative path
+under your `public/` folder (`public/js/auth.js`, `public/css/auth.css`, ...); the
+framework serves yours instead of its bundled copy. Stylesheets (`css/auth.css`,
+`css/TableViewer.css`) are linked at runtime by their matching script, not injected
+server-side.
 
 ## Shared header, footer, navigation — includes
 

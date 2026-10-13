@@ -95,8 +95,11 @@ runs. Change the limit with `app.max_body_bytes = ...` before `start()`.
 
 | Route | Purpose |
 |-------|---------|
-| `GET /webserver.js` | Framework script injected into every HTML page |
-| `GET /auth.js` | Login overlay script (only when auth is on) |
+| `GET /js/webserver.js` | Framework script injected into every HTML page |
+| `GET /js/auth.js` | Login overlay script (only when auth is on) |
+| `GET /css/auth.css` | Login overlay styling (loaded by auth.js itself) |
+| `GET /js/TableViewer.js` | TableViewer script (only once `addTableViewer()` is used) |
+| `GET /css/TableViewer.css` | TableViewer styling (loaded by TableViewer.js itself) |
 | `GET /api/login-config` | Login form text/options |
 | `POST /api/login` | Login, sets the session cookie |
 | `POST /api/logout` | Clears the session cookie |
