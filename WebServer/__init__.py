@@ -1,6 +1,8 @@
 from http.server import HTTPServer
+import json
 import os
 import sys
+from urllib.parse import parse_qs, urlparse
 
 from WebServer.FileHandler import handle_file_request
 from WebServer.WebHandler import WebHandler
@@ -33,10 +35,10 @@ class WebServer:
         self.security_headers_enabled = True
         self.max_body_bytes = 10 * 1024 * 1024   # largest accepted request body
 
-        # Where the installed package's bundled static files live
+        # Where the installed package's bundled static files live, split into
+        # public/js and public/css the same way a consumer's own static_dir
+        # may override any of them (e.g. static_dir/js/auth.js).
         self.package_public_dir = os.path.join(os.path.dirname(__file__), 'public')
-        self.package_default_js = os.path.join(self.package_public_dir, 'webserver.js')
-        self.package_auth_js = os.path.join(self.package_public_dir, 'auth.js')
         self.framework_assets_prefix = '/framework-assets/'
 
         # Allow callers to override where static files live. If not provided,
@@ -86,25 +88,55 @@ class WebServer:
             print("[ web_framework ] No 'public' folder found. Static file serving is disabled. To enable, create a 'public' directory next to your script or pass `static_dir` to WebServer.")
 
         # Always inject canonical framework routes.
-        self.default_js = '/webserver.js'
-        self.auth_js = '/auth.js'
+        self.default_js = '/js/webserver.js'
+        self.auth_js = '/js/auth.js'
         print(f"[ web_framework ] Default script injection enabled: {self.default_js}")
 
-        # Register framework-provided JS routes inside the server.
-        @self.route('GET', '/auth.js', public=True)
-        def serve_auth_js(request):
-            if not self.auth:
+        # TableViewer.js is only injected once a table is actually exposed
+        # (see addTableViewer()), so pages that never use it don't load it.
+        self.table_viewer_js = '/js/TableViewer.js'
+        self.table_viewer_enabled = False
+
+        # Register framework-provided js/css asset routes inside the server.
+        self._register_asset_route('/js/auth.js', 'js/auth.js', 'application/javascript',
+                                    gate=lambda: bool(self.auth))
+        self._register_asset_route('/js/webserver.js', 'js/webserver.js', 'application/javascript',
+                                    extra_relative_fallback='js/default.js')
+        self._register_asset_route('/js/TableViewer.js', 'js/TableViewer.js', 'application/javascript')
+        self._register_asset_route('/css/TableViewer.css', 'css/TableViewer.css', 'text/css')
+        self._register_asset_route('/css/auth.css', 'css/auth.css', 'text/css')
+
+    def _register_asset_route(self, url_path, relative_path, content_type, gate=None, extra_relative_fallback=None):
+        """Serve a framework-bundled js/css file, overridable by dropping the
+        same relative path under the consumer's own static_dir (e.g. a local
+        static_dir/js/auth.js wins over the package's copy).
+
+        gate: optional no-arg callable; a falsy result serves 404 (used so
+              auth.js/auth.css 404 when auth isn't enabled).
+        extra_relative_fallback: a second relative path tried after the
+              primary one, both locally and in the package (webserver.js
+              falls back to a consumer's own js/default.js).
+        """
+        def _find(base):
+            if not base:
+                return None
+            for rel in (relative_path, extra_relative_fallback):
+                if not rel:
+                    continue
+                candidate = os.path.join(base, *rel.split('/'))
+                if os.path.exists(candidate) and os.path.isfile(candidate):
+                    return candidate
+            return None
+
+        @self.route('GET', url_path, public=True)
+        def serve(request):
+            if gate is not None and not gate():
                 request.send_response(404)
                 request.end_headers()
                 return
 
-            local_path = os.path.join(self.static_dir, 'auth.js') if self.static_dir else None
-            package_path = self.package_auth_js
-            if local_path and os.path.exists(local_path) and os.path.isfile(local_path):
-                path = local_path
-            elif os.path.exists(package_path) and os.path.isfile(package_path):
-                path = package_path
-            else:
+            path = _find(self.static_dir) or _find(self.package_public_dir)
+            if not path:
                 request.send_response(404)
                 request.end_headers()
                 return
@@ -113,46 +145,14 @@ class WebServer:
                 content = f.read()
 
             request.send_response(200)
-            request.send_header('Content-Type', 'application/javascript')
+            request.send_header('Content-Type', content_type)
             request.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
             request.send_header('Pragma', 'no-cache')
             request.send_header('Expires', '0')
             request.end_headers()
             request.wfile.write(content)
 
-        @self.route('GET', '/webserver.js', public=True)
-        def serve_webserver_js(request):
-            local_js = None
-            if self.static_dir:
-                local_js = os.path.join(self.static_dir, 'webserver.js')
-                if not os.path.exists(local_js) or not os.path.isfile(local_js):
-                    local_js = os.path.join(self.static_dir, 'default.js')
-                    if not os.path.exists(local_js) or not os.path.isfile(local_js):
-                        local_js = None
-
-            package_js = None
-            if os.path.exists(self.package_default_js) and os.path.isfile(self.package_default_js):
-                package_js = self.package_default_js
-            package_default_js = os.path.join(self.package_public_dir, 'default.js')
-            if package_js is None and os.path.exists(package_default_js) and os.path.isfile(package_default_js):
-                package_js = package_default_js
-
-            path = local_js or package_js
-            if path:
-                with open(path, 'rb') as f:
-                    content = f.read()
-            else:
-                request.send_response(404)
-                request.end_headers()
-                return
-
-            request.send_response(200)
-            request.send_header('Content-Type', 'application/javascript')
-            request.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-            request.send_header('Pragma', 'no-cache')
-            request.send_header('Expires', '0')
-            request.end_headers()
-            request.wfile.write(content)
+        return serve
 
     def addPath(self, url_path, file_path, public=False, roles=None):
         """Maps a URL to ANY file, safely resolving the path.
@@ -161,6 +161,78 @@ class WebServer:
         roles=["admin"] restricts it to users with one of those roles.
         """
         self.routes = handle_file_request(self, url_path, file_path, public=public, roles=roles)
+
+    def addTableViewer(self, url_path, table, roles=None, public=False, limit=40):
+        """Expose a database table as a paginated/searchable/sortable JSON feed for TableViewer.js.
+
+        GET url_path?page=1&limit=40&search=...&sort=Column&dir=asc returns
+            {"rows", "columns", "page", "limit", "total", "totalPages", "sort", "sortDir", "search"}
+
+        table:  real table name; re-checked against the live schema on every
+                request (table names can't be bound as query parameters).
+        limit:  rows PER PAGE, and also the ceiling - the client may ask for
+                fewer with ?limit=N (or via data-tableviewer-limit in HTML),
+                but never more than this.
+        roles/public: same meaning as route() - defaults to requiring login,
+                no specific role.
+
+        Also turns on TableViewer.js injection (see get_inject_js_urls()), so
+        in your own HTML you only need:
+            <div data-tableviewer="url_path"></div>
+        """
+        from WebServer.database import get_table_page
+
+        @self.route('GET', url_path, public=public, roles=roles)
+        def table_viewer_route(request):
+            query = parse_qs(urlparse(request.path).query)
+
+            def _int(name, default):
+                try:
+                    return int(query.get(name, [default])[0])
+                except (TypeError, ValueError):
+                    return default
+
+            page = max(1, _int('page', 1))
+            per_page = max(1, min(_int('limit', limit), limit))
+            search = (query.get('search', [''])[0] or '').strip()
+            sort = (query.get('sort', [None])[0]) or None
+            sort_dir = (query.get('dir', ['asc'])[0]) or 'asc'
+
+            try:
+                rows, total, columns = get_table_page(
+                    table, page=page, per_page=per_page, search=search or None,
+                    sort=sort, sort_dir=sort_dir)
+            except ValueError as e:
+                request.send_response(404)
+                request.send_header('Content-Type', 'application/json')
+                request.end_headers()
+                request.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+
+            total_pages = max(1, -(-total // per_page))  # ceil division
+            payload = {
+                "rows": rows,
+                "columns": columns,
+                "page": page,
+                "limit": per_page,
+                "total": total,
+                "totalPages": total_pages,
+                "sort": sort,
+                "sortDir": sort_dir,
+                "search": search,
+            }
+
+            request.send_response(200)
+            request.send_header('Content-Type', 'application/json')
+            request.end_headers()
+            # mssql/mysql drivers return DATE/TIME/DECIMAL columns as native
+            # Python objects (date, time, Decimal, ...) that json can't
+            # serialize directly; default=str renders them the same way
+            # TableViewer.js would display them anyway.
+            request.wfile.write(json.dumps(payload, default=str).encode('utf-8'))
+
+        self.table_viewer_enabled = True
+        return table_viewer_route
 
     def settings(self, auth=None, jwtSecret=None, tokenLifetimeHours=24, secureCookie=False,
                  bearerTokens=True, maxLoginAttempts=5, lockoutMinutes=15, minPasswordLength=5,
@@ -414,11 +486,14 @@ class WebServer:
     def get_inject_js_urls(self):
         urls = []
         if self.default_js:
-            version = self._asset_version('webserver.js') or self._asset_version('default.js')
-            urls.append(f"/webserver.js?v={version}" if version else '/webserver.js')
+            version = self._asset_version('js/webserver.js') or self._asset_version('js/default.js')
+            urls.append(f"{self.default_js}?v={version}" if version else self.default_js)
         if self.auth and self.auth_js:
-            version = self._asset_version('auth.js')
-            urls.append(f"/auth.js?v={version}" if version else '/auth.js')
+            version = self._asset_version('js/auth.js')
+            urls.append(f"{self.auth_js}?v={version}" if version else self.auth_js)
+        if self.table_viewer_enabled:
+            version = self._asset_version('js/TableViewer.js')
+            urls.append(f"{self.table_viewer_js}?v={version}" if version else self.table_viewer_js)
         return urls
 
     def can_serve_static_js(self, file_name):
@@ -469,10 +544,10 @@ class WebServer:
 
     def _register_asset_alias_routes(self):
         get_routes = self.routes.setdefault('GET', {})
-        if '/auth.js' in get_routes:
-            get_routes['/public/auth.js'] = get_routes['/auth.js']
-        if '/webserver.js' in get_routes:
-            get_routes['/public/webserver.js'] = get_routes['/webserver.js']
+        for url_path in ('/js/auth.js', '/js/webserver.js', '/js/TableViewer.js',
+                          '/css/TableViewer.css', '/css/auth.css'):
+            if url_path in get_routes:
+                get_routes[f'/public{url_path}'] = get_routes[url_path]
 
     def start(self):
         """Boots the server."""

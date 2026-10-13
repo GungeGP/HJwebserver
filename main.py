@@ -4,11 +4,12 @@ from WebServer import WebServer
 
 app = WebServer(port=8080)
 # type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
-app.setDatabase(type="mssql", server="localhost", dbName="workTime")
-# app.setDatabase(type="sqlite", dbName="workTime.db")
+app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
+
+app.addTableViewer('/api/worktime', table="WorkTimeEntries", roles=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows
 
 # Users are created by an admin, not by self-registration:
 #   python -m WebServer createuser admin --role admin
