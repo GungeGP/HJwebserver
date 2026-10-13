@@ -9,7 +9,7 @@ app.setDatabase(type="sqlite", dbName="workTime.db")
 app.addPath('/', 'public/index.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
-app.addTableViewer('/api/worktime', table="WorkTimeEntries", roles=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows
+app.addTableViewer('/api/worktime', table="WorkTimeEntries", edit=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows
 
 # Users are created by an admin, not by self-registration:
 #   python -m WebServer createuser admin --role admin

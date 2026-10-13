@@ -37,6 +37,7 @@ class TableViewer {
         this.total = 0;
         this.totalPages = 1;
         this.primaryKey = [];
+        this.canEdit = false;
         this._searchTimer = null;
         this._paginated = Boolean(this.url);
 
@@ -107,6 +108,7 @@ class TableViewer {
             this.totalPages = data.totalPages ?? 1;
             this.page = data.page ?? this.page;
             this.primaryKey = data.primaryKey || [];
+            this.canEdit = Boolean(data.canEdit);
 
             this.errorEl.hidden = true;
             this.scrollEl.hidden = false;
@@ -158,21 +160,23 @@ class TableViewer {
             }
             headRow.appendChild(th);
         });
-        const actionsHead = document.createElement('th');
-        actionsHead.className = 'tableviewer-actions-col';
-        actionsHead.textContent = 'Actions';
-        headRow.appendChild(actionsHead);
+        // No Actions column at all for viewers who can't edit - a disabled
+        // button there would just be dead weight for them, not a real affordance.
+        if (this.canEdit) {
+            const actionsHead = document.createElement('th');
+            actionsHead.className = 'tableviewer-actions-col';
+            actionsHead.textContent = 'Actions';
+            headRow.appendChild(actionsHead);
+        }
 
         const body = this.tableEl.createTBody();
         if (!this.rows.length) {
             const td = body.insertRow().insertCell();
-            td.colSpan = this.columns.length + 1;
+            td.colSpan = this.columns.length + (this.canEdit ? 1 : 0);
             td.className = 'tableviewer-empty';
             td.textContent = 'No rows found.';
             return;
         }
-
-        const canEdit = this._paginated && this.primaryKey.length > 0;
 
         this.rows.forEach(row => {
             const tr = body.insertRow();
@@ -183,20 +187,16 @@ class TableViewer {
                 cell.dataset.column = name;
             });
 
-            const actionCell = tr.insertCell();
-            actionCell.className = 'tableviewer-actions-col';
-            const editBtn = document.createElement('button');
-            editBtn.type = 'button';
-            editBtn.className = 'tableviewer-edit-btn';
-            editBtn.textContent = 'Edit';
-            editBtn.disabled = !canEdit;
-            if (!canEdit && this._paginated) {
-                editBtn.title = "This table has no primary key, so rows can't be edited safely.";
-            }
-            if (canEdit) {
+            if (this.canEdit) {
+                const actionCell = tr.insertCell();
+                actionCell.className = 'tableviewer-actions-col';
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'tableviewer-edit-btn';
+                editBtn.textContent = 'Edit';
                 editBtn.addEventListener('click', () => this._beginRowEdit(tr, row));
+                actionCell.appendChild(editBtn);
             }
-            actionCell.appendChild(editBtn);
         });
     }
 

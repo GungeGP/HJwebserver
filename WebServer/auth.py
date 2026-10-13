@@ -102,6 +102,7 @@ def attach_auth_routes(server):
     _register(server, 'GET', '/api/login-config', _login_config_route, public=True)
     _register(server, 'POST', '/api/login', _login_route, public=True)
     _register(server, 'POST', '/api/logout', _logout_route, public=True)
+    _register(server, 'GET', '/logout', _logout_redirect_route, public=True)
     # These three stay reachable while a password change is pending.
     _register(server, 'GET', '/api/verify', _verify_route, public=False, allow_pending=True)
     _register(server, 'POST', '/api/change-password', _change_password_route, public=False, allow_pending=True)
@@ -465,6 +466,24 @@ def _logout_route(request):
     audit("logout", username, None, request)
     _send_json(request, 200, {"valid": False, "message": "Logged out"},
                headers={"Set-Cookie": _session_cookie(None)})
+
+
+def _logout_redirect_route(request):
+    """GET /logout - same revocation as POST /api/logout, but for typing the
+    URL directly into a browser: redirects to / instead of returning JSON,
+    so you land back on the login screen (handy for testing as multiple users).
+    """
+    token = _token_from_request(request)
+    username = None
+    if token:
+        user = resolve_user(request)
+        username = user["username"] if user else None
+        revoke_token(token)
+    audit("logout", username, None, request)
+    request.send_response(302)
+    request.send_header('Location', '/')
+    request.send_header('Set-Cookie', _session_cookie(None))
+    request.end_headers()
 
 
 def _logout_all_route(request):
