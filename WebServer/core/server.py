@@ -54,6 +54,9 @@ class ServerMixin:
             candidate = os.path.abspath(static_dir)
             if os.path.exists(candidate) and os.path.isdir(candidate):
                 self.static_dir = candidate
+                # addPath('/x', 'public/x.html') resolves against base_dir,
+                # so it must be the static folder's parent, not the package's.
+                self.base_dir = os.path.dirname(candidate)
 
         if not self.static_dir:
             candidates = []
