@@ -10,8 +10,6 @@ app.setDatabase(type="mssql", server="localhost", dbName="HJWebServer")  # Windo
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html', public=True)  # page is only an empty frame; its data (/api/daily) still needs login
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
-
-app.addTableViewer('/api/worktime', table="WorkTimeEntries", edit=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows
     
 app.addTableViewer('/api/daily', table="Employees",
     columns={"Medarbejder": "Name", "Afdeling": "DepartmentId"},
@@ -22,30 +20,10 @@ app.addTableViewer('/api/daily', table="Employees",
              "Vælg afdeling": selectFilter("DepartmentId")},
     editable=["Check ind", "Check ud"], edit=["admin"])
 
-# Users are created by an admin, not by self-registration:
-#   python -m WebServer createuser admin --role admin
-# or from code:  app.createUser("admin", "change-me-please", role="admin")   # False if it already exists
-
-@app.route('POST', '/api/data')
-def data_route(request):
-    # 1. You can now access the parsed frontend data directly!
-    print("Data received from frontend:", request.body, "from user:", request.user["username"])
-    
-    # 2. Prepare the response
-    request.send_response(200)
-    request.send_header('Content-Type', 'application/json')
-    request.end_headers()
-    
-    # 3. Send a JSON response back
-    response_data = {"message": "The framework POST route works!", "status": "success"}
-    request.wfile.write(json.dumps(response_data).encode('utf-8'))
-
-@app.route('GET', '/hello', public=True)
-def hello_route(request):
-    request.send_response(200)
-    request.send_header('Content-Type', 'text/plain')
-    request.end_headers()
-    request.wfile.write(b"Hello from the secure internal server!")
+# Create an admin user
+# python -m WebServer createuser admin --role admin
+user_created = app.createUser("admin", "12345", role="admin")   # False if it already exists
+print(f"Admin user created: {user_created}")
 
 if __name__ == "__main__":
     app.start()
