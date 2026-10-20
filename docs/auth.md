@@ -159,6 +159,87 @@ refuse the header entirely if only browsers will ever call the server.
 While a password change is pending, every other protected route answers
 `403 {"error": "password_change_required"}`.
 
+## Changing how the login looks
+
+| What | How |
+|---|---|
+| Title, message, logo | `settings(auth=True, loginTitle="...", loginMessage="...", loginLogo="/img/logo.png")` |
+| All of the styling | Put your own `public/css/auth.css` in the project. It replaces the framework's copy completely, so start from a copy of `WebServer/public/css/auth.css` |
+| A few rules, on a public page | Ordinary CSS in your page, e.g. `html #login-overlay { background-color: rgba(255,255,255,.35); }` |
+
+On a protected page, a visitor who isn't logged in never receives your HTML.
+They get a bare login page from the framework, so only `auth.css` styles it,
+not your page's own CSS. Making the page public (`addPath(..., public=True)`)
+sends your page with the login form on top. That's how to show a
+[TableViewer ghost table behind the login](tableviewer.md#showing-the-table-behind-the-login).
+
+### Your own `auth.css`
+
+When the browser asks for `/css/auth.css`, the framework serves
+`public/css/auth.css` from your project if it exists, and its own copy only
+otherwise. The same goes for every framework file: `public/js/auth.js`,
+`public/css/TableViewer.css`, and so on. These files are sent uncached, so
+a change shows on the next reload.
+
+Your file **replaces** the framework's, it doesn't add to it. Copy
+`WebServer/public/css/auth.css` into `public/css/` and edit from there,
+otherwise everything you don't restyle loses its styling.
+
+What the login form is made of (drawn by `auth.js`):
+
+| Selector | What it is |
+|---|---|
+| `#login-overlay` | The full-screen layer behind the form (dark and blurred by default) |
+| `.login-box` | The card holding the form |
+| `.login-box .headerLine` | The colored bar at the top of the card |
+| `.login-box img.logo` | The logo, when `loginLogo=` is set |
+| `#login-form h2`, `#login-form p` | Title and message (`loginTitle=`, `loginMessage=`) |
+| `#username`, `#password` | The input fields |
+| `.login-box label.remember` | "Remember me" (hidden with `rememberMeDays=0`) |
+| `#login-btn` | Sign in; disabled until both fields are filled |
+| `#change-form` | The change-password form: `#current-password`, `#new-password`, `#confirm-password`, `#change-btn` |
+| `#change-cancel`, `.login-box button.secondary` | Cancel on the change-password form |
+
+**Keep `display: none` on `#login-overlay`.** `auth.js` switches it to
+`display: flex` to show the form and back to `none` after login. Without
+`display: none` in your CSS, the login box stays on screen once you're logged in.
+
+Example: a see-through background and a card in your own colors.
+
+```css
+#login-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    display: none; justify-content: center; align-items: center;
+    background: rgba(255, 255, 255, 0.35);
+}
+.login-box {
+    background: #fff; border-radius: 12px; width: clamp(300px, 30vw, 400px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15); overflow: hidden; text-align: center;
+}
+.login-box .headerLine { height: 6px; background: #00563B; }
+.login-box form { display: flex; flex-direction: column; padding: 24px; }
+.login-box input[type="text"], .login-box input[type="password"] {
+    margin-bottom: 12px; padding: 10px; border: 1px solid #d0d7de; border-radius: 8px;
+}
+.login-box button { padding: 10px; border: none; border-radius: 8px; background: #00563B; color: #fff; cursor: pointer; }
+.login-box button:disabled { background: #e3edf3; color: #2c3531; cursor: not-allowed; }
+.login-box button.secondary { background: none; color: #00563B; }
+```
+
+### What CSS can't change
+
+CSS changes how the form looks, not what's in it. Which fields and buttons
+exist, and in what order, comes from `auth.js`. The text and logo come from
+`settings()`.
+
+A different form, such as other fields or the email-first layout in
+[SignInForm.md](SignInForm.md), means overriding `public/js/auth.js` the same
+way. That works, but your copy then *is* the login: a mistake in it can lock
+everyone out, and later fixes to the framework's `auth.js` won't reach you.
+Keep the parts the server relies on: posting `{"username", "password",
+"rememberMe"}` to `/api/login`, reloading after a successful login, and
+showing the form again when a request answers `401`.
+
 ## HTTPS
 
 Without TLS, passwords and session cookies cross the network in the clear. On a

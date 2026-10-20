@@ -8,7 +8,7 @@ app = WebServer(port=8080)
 app.setDatabase(type="mssql", server="localhost", dbName="HJWebServer")  # Windows login; add user=/password= for a SQL Server login
 # app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
-app.addPath('/', 'public/index.html')
+app.addPath('/', 'public/index.html', public=True)  # page is only an empty frame; its data (/api/daily) still needs login
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
 app.addTableViewer('/api/worktime', table="WorkTimeEntries", edit=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows

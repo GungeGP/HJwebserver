@@ -27,9 +27,39 @@ That's the whole setup. The script and styles are loaded automatically once
   `time`, both for `datetime`/`datetime2`, number fields, checkboxes for
   `bit`/`boolean`, dropdowns for lookups.
 - **Readable values**: dates as `DD-MM-YYYY`, times as `HH:MM`, empty values as `–`.
+- **A loading state**: placeholder rows that fill the table while the first
+  page loads. After that, the current rows dim under a progress bar while the
+  next page, filter or search loads. Answers faster than 150 ms show no
+  loader, and only the newest request ever updates the table.
 
 Fields you don't touch aren't sent when saving, so a `datetime2(7)` value
 keeps its full precision unless you actually change it.
+
+## Showing the table behind the login
+
+When the data route answers "not logged in", TableViewer keeps its placeholder
+rows instead of showing an error. The login form then sits on top of a ghost
+table. To get that, the *page* has to be public; the data stays protected:
+
+```python
+app.addPath('/', 'public/index.html', public=True)    # the page: an empty frame
+app.addTableViewer('/api/daily', table="Employees")   # the data: still requires login
+```
+
+Only do this for pages whose HTML contains nothing private. Anonymous visitors
+receive the page itself, just never its rows.
+
+Because the page is public, your own CSS applies on the login screen too, for
+example a see-through overlay instead of the default dark one:
+
+```html
+<style>
+  html #login-overlay { background-color: rgba(255, 255, 255, 0.35); backdrop-filter: none; }
+</style>
+```
+
+(`html #login-overlay` rather than `#login-overlay`, so it wins over the
+framework's `auth.css` no matter which loads first.)
 
 ## Choosing columns
 
