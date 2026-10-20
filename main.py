@@ -1,15 +1,26 @@
 import json
 
 from WebServer import WebServer
+from WebServer.tableviewer import dateFilter, duration, selectFilter
 
 app = WebServer(port=8080)
 # type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
-app.setDatabase(type="sqlite", dbName="workTime.db")
+app.setDatabase(type="mssql", server="localhost", dbName="HJWebServer")  # Windows login; add user=/password= for a SQL Server login
+# app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
 app.addTableViewer('/api/worktime', table="WorkTimeEntries", edit=["admin"], limit=40)  # Only users with role "admin" can access this table viewer, limit to 100 rows
+    
+app.addTableViewer('/api/daily', table="Employees",
+    columns={"Medarbejder": "Name", "Afdeling": "DepartmentId"},
+    related={"table": "WorkTimeEntries", "match": {"EmployeeId": "Id"},
+             "columns": {"Check ind": "CheckIn", "Check ud": "CheckOut"}},
+    computed={"Varighed": lambda r: duration(r["CheckIn"], r["CheckOut"])},
+    filters={"Vælg dag": dateFilter("WorkTimeEntries.WorkDate"),
+             "Vælg afdeling": selectFilter("DepartmentId")},
+    editable=["Check ind", "Check ud"], edit=["admin"])
 
 # Users are created by an admin, not by self-registration:
 #   python -m WebServer createuser admin --role admin
