@@ -15,6 +15,7 @@ connection and login.
 | [Authentication](auth.md) | How login works, sessions, protecting routes |
 | [Managing users](users.md) | CLI and Python API for users, roles, passwords, lockouts |
 | [Frontend](frontend.md) | Shared header/footer includes, the login overlay, `hjAuth`, `Notify` |
+| [TableViewer](tableviewer.md) | Database tables in a page: search, filters, lookups, related tables, editing |
 
 ## Getting started
 
