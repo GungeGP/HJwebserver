@@ -1,12 +1,26 @@
 // Styling lives in css/TableViewer.css (served/overridable the same way as
 // this file - see WebServer/core/assets.py).
+let _tvStylesLoaded = false;
+let _tvStylesReady = null;
+
+/** Adds the stylesheet once; resolves when it has loaded (or failed). */
 function _ensureTableViewerStyles() {
-    if (document.getElementById('tableviewer-styles')) return;
-    const link = document.createElement('link');
-    link.id = 'tableviewer-styles';
-    link.rel = 'stylesheet';
-    link.href = '/css/TableViewer.css';
-    document.head.appendChild(link);
+    let link = document.getElementById('tableviewer-styles');
+    if (!link) {
+        link = document.createElement('link');
+        link.id = 'tableviewer-styles';
+        link.rel = 'stylesheet';
+        link.href = '/css/TableViewer.css';
+        document.head.appendChild(link);
+    }
+    if (!_tvStylesReady) {
+        _tvStylesReady = new Promise(resolve => {
+            if (link.sheet) { resolve(); return; }
+            link.addEventListener('load', resolve);
+            link.addEventListener('error', resolve);
+        }).then(() => { _tvStylesLoaded = true; });
+    }
+    return _tvStylesReady;
 }
 
 // --- value formatting -------------------------------------------------------
@@ -85,6 +99,8 @@ class TableViewer {
         this.canEdit = false;
         this._searchTimer = null;
         this._paginated = Boolean(this.url);
+        this._loadToken = 0;
+        this._hasRendered = false;
 
         _ensureTableViewerStyles();
         this._buildShell();
@@ -122,9 +138,12 @@ class TableViewer {
 
         const scroll = document.createElement('div');
         scroll.className = 'tableviewer-scroll';
+        this.progressEl = document.createElement('div');
+        this.progressEl.className = 'tableviewer-progress';
+        this.progressEl.hidden = true;
         this.tableEl = document.createElement('table');
         this.tableEl.className = 'tableviewer';
-        scroll.appendChild(this.tableEl);
+        scroll.append(this.progressEl, this.tableEl);
         this.scrollEl = scroll;
         this.container.appendChild(scroll);
 
@@ -147,13 +166,30 @@ class TableViewer {
         }
         const separator = this.url.includes('?') ? '&' : '?';
 
+        // Only the newest request may update the table: clicking the day arrow
+        // twice quickly must not let a slow first answer overwrite the second.
+        const token = ++this._loadToken;
+        let slow = null;
+        if (this._hasRendered) {
+            // Fast answers show no loader at all, so quick clicks don't flicker.
+            slow = setTimeout(() => { if (token === this._loadToken) this._setLoading(true); }, 150);
+        } else {
+            this._setLoading(true);
+        }
+
         try {
             const res = await fetch(`${this.url}${separator}${params}`);
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
+                // Not logged in (or a password change is pending): auth.js is
+                // showing its form, and the page reloads after login. Keep the
+                // placeholder rows (or the rows already shown) underneath it
+                // rather than an error message.
+                if (res.status === 401 || data.error === 'password_change_required') return this;
                 throw new Error(data.error || `HTTP ${res.status}`);
             }
             const data = await res.json();
+            if (token !== this._loadToken) return this;
 
             this.rows = data.rows || [];
             this.columns = this.filterColumns || data.columns
@@ -179,12 +215,70 @@ class TableViewer {
             this.scrollEl.hidden = false;
             this._render();
         } catch (err) {
+            if (token !== this._loadToken) return this;
             this.errorEl.textContent = `Failed to load table: ${err.message}`;
             this.errorEl.hidden = false;
             this.scrollEl.hidden = true;
             if (this.paginationEl) this.paginationEl.replaceChildren();
+        } finally {
+            clearTimeout(slow);
+            if (token === this._loadToken) this._setLoading(false);
         }
         return this;
+    }
+
+    // --- loading state ------------------------------------------------------
+
+    /** Before the first answer: placeholder rows. After that: dim the current
+     *  rows and run a progress bar, so the table doesn't jump around. */
+    _setLoading(on) {
+        this._loading = on;
+        this.scrollEl.setAttribute('aria-busy', on ? 'true' : 'false');
+        this.progressEl.hidden = !on;
+        if (on && !this._hasRendered) {
+            this._renderSkeleton();
+            return;
+        }
+        this.scrollEl.classList.toggle('tableviewer-busy', on);
+    }
+
+    _renderSkeleton() {
+        this.tableEl.innerHTML = '';
+        const columns = this.columns.length || 4;
+        const widths = [70, 45, 85, 55, 65, 40];
+        const bar = width => {
+            const span = document.createElement('span');
+            span.className = 'tableviewer-skeleton';
+            span.style.width = `${width}%`;
+            return span;
+        };
+        const head = this.tableEl.createTHead().insertRow();
+        for (let c = 0; c < columns; c++) {
+            const th = document.createElement('th');
+            th.append(bar(40 + (c * 17) % 40));
+            head.append(th);
+        }
+        const body = this.tableEl.createTBody();
+        const addRow = r => {
+            const tr = body.insertRow();
+            for (let c = 0; c < columns; c++) tr.insertCell().append(bar(widths[(r + c) % widths.length]));
+            return tr;
+        };
+
+        // Fill the visible area: measure one row, then add as many as fit.
+        // Never more than a page holds, so the ghost matches what's coming.
+        const rowHeight = addRow(0).offsetHeight;
+        const space = this.scrollEl.clientHeight - this.tableEl.tHead.offsetHeight;
+        const fits = rowHeight > 0 && space > 0 ? Math.floor(space / rowHeight) : 8;
+        for (let r = 1; r < Math.max(1, Math.min(this.limit, fits)); r++) addRow(r);
+
+        // Measured before the stylesheet applied? Redraw once it has - also
+        // when the skeleton stays up behind the login form after a 401.
+        if (!_tvStylesLoaded) {
+            _ensureTableViewerStyles().then(() => {
+                if (!this._hasRendered && !this.scrollEl.hidden) this._renderSkeleton();
+            });
+        }
     }
 
     /** Render a static, unpaginated array of rows directly (no server round-trip). */
@@ -202,6 +296,7 @@ class TableViewer {
     }
 
     _render() {
+        this._hasRendered = true;
         this._renderFilters();
         this._renderTable();
         if (this.paginationEl) this._renderPagination();
