@@ -139,6 +139,16 @@ def fetch_all(sql, params=()):
         return records
 
 
+def describe(sql, params=()):
+    """Column names a query returns, without fetching any rows."""
+    with _connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(_prepare(sql), tuple(params))
+        names = [col[0] for col in cursor.description or ()]
+        cursor.close()
+        return names
+
+
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------

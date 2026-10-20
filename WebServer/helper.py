@@ -7,7 +7,9 @@ def send_json(request, status, payload, headers=None):
     for name, value in (headers or {}).items():
         request.send_header(name, value)
     request.end_headers()
-    request.wfile.write(json.dumps(payload).encode('utf-8'))
+    # default=str: values from the database (dates, Decimal, ...) or from a
+    # consumer's computed column shouldn't crash the response.
+    request.wfile.write(json.dumps(payload, default=str).encode('utf-8'))
 
 
 # Internal name kept for the framework's own modules.

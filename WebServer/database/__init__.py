@@ -28,6 +28,7 @@ from WebServer.database.core import (
     execute,
     fetch_one,
     fetch_all,
+    describe,
     create_tables,
     save_work_time,
 )
@@ -66,4 +67,15 @@ from WebServer.database.tableviewer import (
     get_table_page,
     get_primary_key_columns,
     update_table_row,
+    get_foreign_keys,
+    count_rows,
+    text_expr,
+    select_rows,
+    describe_query,
+    get_row,
+    update_row,
+    insert_row,
+    lookup_options,
+    distinct_values,
+    distinct_from,
 )

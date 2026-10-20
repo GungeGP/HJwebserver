@@ -3,21 +3,29 @@ sorted rows for *any* table, not just the framework's own ones.
 
 Backs WebServer.addTableViewer() / public/js/TableViewer.js. Nothing here knows
 about auth, sessions, or any specific table name - that's the whole point.
+
+Table and column names can't be bound as query parameters, so every function
+here that puts a name into SQL first checks it against the live schema
+(get_table_names / get_table_columns). Callers may pass names that came from
+a request; the check is what keeps them from being an injection vector.
 """
 
-from WebServer.database.core import execute, fetch_all, fetch_one, get_database_type
+from WebServer.database.core import describe, execute, fetch_all, fetch_one, get_database_type
 
 _CAST_TYPE = {"sqlite": "TEXT", "mssql": "NVARCHAR(MAX)", "mysql": "CHAR"}
 
 
 def get_table_names():
-    """All user tables in the configured database, sorted by name."""
+    """All user tables and views in the configured database, sorted by name.
+
+    Views are included so a JOIN saved as a view can be shown like a table.
+    """
     db_type = get_database_type()
     if db_type == "sqlite":
-        rows = fetch_all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        rows = fetch_all("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name")
         return [r.name for r in rows]
     if db_type == "mssql":
-        rows = fetch_all("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME")
+        rows = fetch_all("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_NAME")
         return [r.TABLE_NAME for r in rows]
     if db_type == "mysql":
         rows = fetch_all("SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY TABLE_NAME")
@@ -171,3 +179,183 @@ def update_table_row(table, pk_values, changes):
     where_clause = " AND ".join(f"{col} = ?" for col in pk_cols)
     params = list(changes.values()) + [pk_values[col] for col in pk_cols]
     execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}", params)
+
+
+# ---------------------------------------------------------------------------
+# Building blocks for multi-table viewers (related tables, lookups, filters)
+# ---------------------------------------------------------------------------
+
+def _require_columns(table, columns):
+    """Raise ValueError unless `table` exists and has every name in `columns`."""
+    known = {c["name"] for c in get_table_columns(table)}
+    unknown = [c for c in columns if c not in known]
+    if unknown:
+        raise ValueError(f"Unknown column(s) on '{table}': {', '.join(unknown)}")
+
+
+def get_foreign_keys(table):
+    """{column: (referenced_table, referenced_column)} for every single-column
+    foreign key declared on `table`. Empty for views or tables without any."""
+    if table not in get_table_names():
+        raise ValueError(f"Unknown table '{table}'")
+
+    db_type = get_database_type()
+    found = {}
+    if db_type == "sqlite":
+        rows = [vars(r) for r in fetch_all(f"PRAGMA foreign_key_list({table})")]
+        per_constraint = {}
+        for r in rows:
+            per_constraint.setdefault(r["id"], []).append(r)
+        for parts in per_constraint.values():
+            if len(parts) != 1:
+                continue  # composite key - not a simple id lookup
+            r = parts[0]
+            ref_col = r["to"]
+            if not ref_col:
+                pk = get_primary_key_columns(r["table"])
+                ref_col = pk[0] if len(pk) == 1 else None
+            if ref_col:
+                found[r["from"]] = (r["table"], ref_col)
+        return found
+
+    if db_type == "mssql":
+        rows = fetch_all(
+            "SELECT cu.COLUMN_NAME AS col, pk.TABLE_NAME AS ref_table, pku.COLUMN_NAME AS ref_col "
+            "FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc "
+            "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE cu ON cu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME "
+            "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE pku ON pku.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME "
+            "  AND pku.ORDINAL_POSITION = cu.ORDINAL_POSITION "
+            "JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ON pk.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME "
+            "WHERE cu.TABLE_NAME = ?", (table,))
+    elif db_type == "mysql":
+        rows = fetch_all(
+            "SELECT COLUMN_NAME AS col, REFERENCED_TABLE_NAME AS ref_table, REFERENCED_COLUMN_NAME AS ref_col "
+            "FROM information_schema.KEY_COLUMN_USAGE "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL", (table,))
+    else:
+        return found
+
+    counts = {}
+    for r in rows:
+        counts[r.col] = counts.get(r.col, 0) + 1
+    for r in rows:
+        if counts[r.col] == 1:
+            found[r.col] = (r.ref_table, r.ref_col)
+    return found
+
+
+def count_rows(table):
+    if table not in get_table_names():
+        raise ValueError(f"Unknown table '{table}'")
+    return fetch_one(f"SELECT COUNT(*) AS N FROM {table}").N
+
+
+def text_expr(expr):
+    """SQL that turns `expr` into text, so LIKE works on any column type."""
+    return f"CAST({expr} AS {_CAST_TYPE.get(get_database_type(), 'TEXT')})"
+
+
+def _limit_sql(select_sql, rest_sql, limit):
+    """`SELECT <select_sql> <rest_sql>` capped at `limit` rows, per dialect."""
+    if limit is None:
+        return f"SELECT {select_sql} {rest_sql}"
+    if get_database_type() == "mssql":
+        # T-SQL wants "SELECT DISTINCT TOP n", not "SELECT TOP n DISTINCT".
+        if select_sql.upper().startswith("DISTINCT "):
+            return f"SELECT DISTINCT TOP {int(limit)} {select_sql[9:]} {rest_sql}"
+        return f"SELECT TOP {int(limit)} {select_sql} {rest_sql}"
+    return f"SELECT {select_sql} {rest_sql} LIMIT {int(limit)}"
+
+
+def select_rows(select_sql, from_sql, from_params=(), where_sql="", where_params=(),
+                order_sql="1", page=1, per_page=40):
+    """One page of an arbitrary SELECT, plus the total row count.
+
+    Every name inside select_sql/from_sql/where_sql/order_sql must already be
+    validated by the caller - this only adds the paging syntax and runs it.
+    Values go through ``?`` placeholders: from_params belong to ON clauses in
+    from_sql, where_params to where_sql, in that order.
+    """
+    params = list(from_params) + list(where_params)
+    total = fetch_one(f"SELECT COUNT(*) AS N FROM {from_sql} {where_sql}", params).N
+
+    per_page = max(1, int(per_page))
+    offset = max(0, (int(page) - 1) * per_page)
+    if get_database_type() == "mssql":
+        sql = (f"SELECT {select_sql} FROM {from_sql} {where_sql} "
+               f"ORDER BY {order_sql} OFFSET ? ROWS FETCH NEXT ? ROWS ONLY")
+        rows = fetch_all(sql, params + [offset, per_page])
+    else:
+        sql = f"SELECT {select_sql} FROM {from_sql} {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?"
+        rows = fetch_all(sql, params + [per_page, offset])
+    return [vars(r) for r in rows], total
+
+
+def describe_query(sql):
+    """Column names returned by a consumer-written SELECT (for query= viewers)."""
+    return [name for name in describe(f"SELECT * FROM ({sql}) q WHERE 1 = 0") if name]
+
+
+def get_row(table, key_values):
+    """The row of `table` whose key columns equal key_values, as a dict, or None."""
+    _require_columns(table, list(key_values))
+    where = " AND ".join(f"{col} = ?" for col in key_values)
+    row = fetch_one(f"SELECT * FROM {table} WHERE {where}", list(key_values.values()))
+    return vars(row) if row else None
+
+
+def update_row(table, key_values, changes):
+    """UPDATE one row of `table`, identified by key_values ({column: value})."""
+    if not key_values:
+        raise ValueError(f"No key given for '{table}'; can't tell which row to update")
+    if not changes:
+        raise ValueError("No editable columns in the request")
+    _require_columns(table, list(key_values) + list(changes))
+    set_clause = ", ".join(f"{col} = ?" for col in changes)
+    where_clause = " AND ".join(f"{col} = ?" for col in key_values)
+    execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}",
+            list(changes.values()) + list(key_values.values()))
+
+
+def insert_row(table, values):
+    """INSERT one row into `table`."""
+    if not values:
+        raise ValueError("Nothing to insert")
+    _require_columns(table, list(values))
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for _ in values)
+    execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", list(values.values()))
+
+
+def lookup_options(table, id_column, label_column, search=None, limit=None):
+    """[(id, label), ...] from a lookup table, sorted by label.
+
+    search matches the start of the label or the start of any word in it,
+    so "han" finds both "Hanne Olesen" and "Jens Hansen".
+    """
+    _require_columns(table, [id_column, label_column])
+    where_sql, params = "", []
+    if search:
+        label = text_expr(label_column)
+        where_sql = f"WHERE {label} LIKE ? OR {label} LIKE ?"
+        params = [f"{search}%", f"% {search}%"]
+    sql = _limit_sql(f"{id_column} AS v, {label_column} AS l",
+                     f"FROM {table} {where_sql} ORDER BY {label_column}", limit)
+    return [(r.v, r.l) for r in fetch_all(sql, params)]
+
+
+def distinct_values(table, column, limit=200):
+    """Distinct non-empty values of one column, sorted - options for a filter
+    on a column that isn't a lookup."""
+    _require_columns(table, [column])
+    sql = _limit_sql(f"DISTINCT {column} AS v",
+                     f"FROM {table} WHERE {column} IS NOT NULL ORDER BY v", limit)
+    return [r.v for r in fetch_all(sql)]
+
+
+def distinct_from(from_sql, expr, limit=200):
+    """distinct_values over an already-validated FROM clause, for query= viewers
+    where there's no single table to name."""
+    sql = _limit_sql(f"DISTINCT {expr} AS v",
+                     f"FROM {from_sql} WHERE {expr} IS NOT NULL ORDER BY v", limit)
+    return [r.v for r in fetch_all(sql)]

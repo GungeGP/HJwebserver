@@ -11,6 +11,7 @@ from WebServer.core.filehandler import FileHandlerMixin
 from WebServer.core.assets import AssetsMixin
 from WebServer.core.auth import AuthMixin
 from WebServer.core.tableviewer import TableViewerMixin
+from WebServer.tableviewer import dateFilter, duration, selectFilter
 
 
 class WebServer(ServerMixin, FileHandlerMixin, AssetsMixin, AuthMixin, TableViewerMixin):

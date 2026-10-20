@@ -4,12 +4,26 @@
     width: 94vw; height: 94vh; margin: 3vh 3vw;
     display: flex; flex-direction: column; overflow: hidden;
 }
-.tableviewer-toolbar { flex: 0 0 auto; display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.tableviewer-toolbar {
+    flex: 0 0 auto; display: flex; justify-content: space-between; align-items: flex-end;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 8px;
+}
 .tableviewer-search {
     padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px;
-    font-size: 14px; min-width: 220px;
+    font-size: 14px; min-width: 220px; margin-left: auto;
 }
 .tableviewer-search:focus { outline: 2px solid #0969da; outline-offset: -1px; }
+.tableviewer-filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.tableviewer-filter { display: flex; flex-direction: column; gap: 4px; }
+.tableviewer-filter-label { font-size: 12px; color: #656d76; }
+.tableviewer-filter-row { display: flex; gap: 4px; align-items: center; }
+.tableviewer-filter-input,
+.tableviewer-filter-row .tableviewer-page-btn { height: 34px; box-sizing: border-box; }
+.tableviewer-filter-input {
+    padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px;
+    font: inherit; font-size: 14px; background: #fff; color: inherit;
+}
+.tableviewer-filter-input:focus { outline: 2px solid #0969da; outline-offset: -1px; }
 .tableviewer-scroll {
     flex: 1 1 auto; min-height: 0; overflow: auto;
     border: 1px solid #d0d7de; border-radius: 6px;
@@ -21,8 +35,9 @@ table.tableviewer th, table.tableviewer td {
 }
 table.tableviewer thead th {
     background: #f6f8fa; font-weight: 600; user-select: none;
-    position: sticky; top: 0;
+    position: sticky; top: 0; z-index: 2;
 }
+table.tableviewer td.tableviewer-null { color: #8c959f; }
 table.tableviewer th.tableviewer-sortable { cursor: pointer; }
 table.tableviewer th.tableviewer-sortable:hover { background: #eaeef2; }
 table.tableviewer th.tableviewer-sortable::after { content: ''; margin-left: 6px; color: #8c959f; }
@@ -44,8 +59,22 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
 .tableviewer-save-btn:hover:not(:disabled) { background: #dafbe1; }
 .tableviewer-cancel-btn { margin-left: 6px; }
 .tableviewer-edit-input {
-    width: 100%; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
+    width: 100%; min-width: 120px; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
     border: 1px solid #0969da; border-radius: 4px; font-family: inherit;
+}
+.tableviewer-edit-input[type="datetime-local"] { min-width: 190px; }
+.tableviewer-edit-check { width: 16px; height: 16px; accent-color: #0969da; }
+.tableviewer-combo { position: relative; min-width: 200px; }
+.tableviewer-combo-list {
+    position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 3;
+    background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08); overflow: hidden;
+}
+.tableviewer-combo-item { padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.tableviewer-combo-item:hover { background: #eef5ff; color: #0969da; }
+.tableviewer-combo-current { font-weight: 600; }
+.tableviewer-combo-info {
+    padding: 5px 10px; font-size: 12px; color: #656d76; border-top: 1px solid #d0d7de;
 }
 .tableviewer-pagination {
     flex: 0 0 auto;
@@ -77,7 +106,13 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
     .tableviewer-edit-btn:disabled { background: #161b22; color: #6e7681; }
     .tableviewer-save-btn { border-color: #3fb950; color: #3fb950; }
     .tableviewer-save-btn:hover:not(:disabled) { background: #0d2b1a; }
-    .tableviewer-edit-input { background: #0d1117; color: #e6edf3; border-color: #388bfd; }
+    .tableviewer-edit-input { background: #0d1117; color: #e6edf3; border-color: #388bfd; color-scheme: dark; }
+    .tableviewer-filter-label { color: #8b949e; }
+    .tableviewer-filter-input { background: #0d1117; border-color: #30363d; color-scheme: dark; }
+    table.tableviewer td.tableviewer-null { color: #6e7681; }
+    .tableviewer-combo-list { background: #161b22; border-color: #30363d; }
+    .tableviewer-combo-item:hover { background: #122033; color: #58a6ff; }
+    .tableviewer-combo-info { color: #8b949e; border-color: #30363d; }
     .tableviewer-page-btn { background: #0d1117; border-color: #30363d; color: #e6edf3; }
     .tableviewer-page-btn:hover:not(:disabled) { background: #161b22; }
     .tableviewer-error { background: #2d1210; border-color: #58221c; color: #ff9492; }
