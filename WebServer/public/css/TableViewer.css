@@ -28,6 +28,29 @@
     flex: 1 1 auto; min-height: 0; overflow: auto;
     border: 1px solid #d0d7de; border-radius: 6px;
 }
+
+/* Loading: placeholder rows before the first answer, then a progress bar
+   and dimmed rows while a new page/filter/search is on its way. */
+.tableviewer-skeleton {
+    display: block; height: 12px; margin: 3px 0; border-radius: 4px; /* 18px tall, like a line of text */
+    background: linear-gradient(90deg, #e1e5ea 25%, #eff2f5 50%, #e1e5ea 75%);
+    background-size: 200% 100%;
+    animation: tableviewer-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes tableviewer-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.tableviewer-progress {
+    position: sticky; top: 0; z-index: 4; height: 3px; margin-bottom: -3px; overflow: hidden;
+}
+.tableviewer-progress::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: -40%; width: 40%;
+    background: #0969da; animation: tableviewer-progress 1s ease-in-out infinite;
+}
+@keyframes tableviewer-progress { from { left: -40%; } to { left: 100%; } }
+.tableviewer-busy table.tableviewer tbody { opacity: 0.45; transition: opacity 0.15s; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+    .tableviewer-skeleton { animation: none; }
+    .tableviewer-progress::after { animation: none; left: 0; width: 100%; opacity: 0.6; }
+}
 table.tableviewer { width: 100%; border-collapse: collapse; }
 table.tableviewer th, table.tableviewer td {
     padding: 8px 12px; text-align: left; border-bottom: 1px solid #d0d7de;
@@ -110,6 +133,8 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
     .tableviewer-filter-label { color: #8b949e; }
     .tableviewer-filter-input { background: #0d1117; border-color: #30363d; color-scheme: dark; }
     table.tableviewer td.tableviewer-null { color: #6e7681; }
+    .tableviewer-skeleton { background: linear-gradient(90deg, #21262d 25%, #30363d 50%, #21262d 75%); background-size: 200% 100%; }
+    .tableviewer-progress::after { background: #388bfd; }
     .tableviewer-combo-list { background: #161b22; border-color: #30363d; }
     .tableviewer-combo-item:hover { background: #122033; color: #58a6ff; }
     .tableviewer-combo-info { color: #8b949e; border-color: #30363d; }
