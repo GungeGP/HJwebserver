@@ -557,6 +557,8 @@ class TableViewer:
             values = distinct_values(f["source"]["table"], f["column"], FILTER_OPTIONS_MAX)
         else:
             values = distinct_from(spec["from"], f["expr"], FILTER_OPTIONS_MAX)
+        if f["col_kind"] == "bool":   # same words as the table cells (TableViewer.js)
+            return [{"value": to_json(v), "label": "Yes" if v else "No"} for v in values]
         return [{"value": to_json(v), "label": str(to_json(v))} for v in values]
 
     def _row_out(self, d, spec):
