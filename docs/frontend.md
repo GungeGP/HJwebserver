@@ -7,6 +7,7 @@ tags inserted just before `</body>`:
 
 ```html
 <script src="/js/webserver.js?v=…"></script>
+<script src="/js/Dialog.js?v=…"></script>
 <script src="/js/auth.js?v=…"></script>   <!-- only when auth is on -->
 <script src="/js/TableViewer.js?v=…"></script>   <!-- only once addTableViewer() is used -->
 ```
@@ -16,8 +17,8 @@ The `?v=` value changes whenever the file changes, so browsers never use a stale
 You can override any of these by putting your own copy at the same relative path
 under your `public/` folder (`public/js/auth.js`, `public/css/auth.css`, ...); the
 framework serves yours instead of its bundled copy. Stylesheets (`css/auth.css`,
-`css/TableViewer.css`) are linked at runtime by their matching script, not injected
-server-side.
+`css/TableViewer.css`, `css/Dialog.css`) are linked at runtime by their matching
+script, not injected server-side.
 
 ## Shared header, footer, navigation — includes
 
@@ -85,6 +86,55 @@ body) to show toasts, banners, etc.:
 
 The login overlay uses it to report "Invalid username or password." and
 connection failures.
+
+## `Dialog.js` — popups: `hjDialog`
+
+A dialog centred on the screen over a dimmed page, available on every page.
+One function, `hjDialog.open(options)`, covers every kind; it returns a
+promise with the answer, or `null` when the user cancels (Cancel, Escape or a
+click outside the box).
+
+```js
+// Ask for a reason before doing something destructive
+const reason = await hjDialog.open({
+    type: 'textarea',
+    title: 'Delete row',
+    message: 'This cannot be undone.',
+    label: 'Reason',
+    confirmText: 'Delete',
+    danger: true,
+});
+if (reason === null) return;   // cancelled
+
+// Plain yes/no
+if (await hjDialog.confirm('Send the report now?')) { … }
+
+// Pick one
+const team = await hjDialog.open({ type: 'select', title: 'Move to team', options: ['IT', 'HR', 'Økonomi'] });
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `type` | `'confirm'` | `'confirm'` (OK/Cancel), `'alert'` (only OK), `'text'`, `'textarea'` (Ctrl+Enter confirms), `'select'` |
+| `title`, `message` | — | Heading and text. Plain text, never HTML; line breaks in `message` are kept |
+| `label`, `placeholder`, `value` | — | Caption, placeholder and starting value of the field |
+| `options` | — | For `'select'`: `['a', 'b']` or `[{ value, label }]` |
+| `required` | `true` | The confirm button stays disabled while the field is empty |
+| `maxLength` | — | Longest text the field accepts |
+| `confirmText`, `cancelText` | `'OK'`, `'Cancel'` | Button texts |
+| `danger` | `false` | Red confirm button, for deleting and other destructive actions |
+| `onConfirm` | — | `async (value) => {…}` run on confirm. Throw to show the error inside the dialog and keep it open, e.g. when the server refuses |
+
+What it resolves to: the trimmed text for `'text'`/`'textarea'`, the chosen
+value for `'select'`, `true` for `'confirm'`/`'alert'`, `null` when cancelled.
+
+Shorthands: `hjDialog.confirm(message, options)`, `hjDialog.alert(message, options)`,
+`hjDialog.prompt(message, options)` (a text field; pass `type: 'textarea'` for
+several lines).
+
+Styling: the classes all start with `hj-dialog` (`.hj-dialog-box`,
+`.hj-dialog-confirm`, …); see `css/Dialog.css`, or override it with your own
+`public/css/Dialog.css`.
 
 ## `auth.js` — the login overlay
 

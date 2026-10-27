@@ -1,0 +1,38 @@
+/* hjDialog - see js/Dialog.js. Same look as TableViewer.css. */
+.hj-dialog {
+    padding: 0; border: none; border-radius: 10px; background: transparent;
+    width: min(440px, calc(100vw - 32px)); max-width: none;
+    font: 14px system-ui, sans-serif; color: #1f2328;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+.hj-dialog::backdrop { background: rgba(31, 35, 40, 0.45); }
+.hj-dialog-box {
+    margin: 0; padding: 20px; background: #fff; border-radius: 10px;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.hj-dialog-title { margin: 0; font-size: 17px; font-weight: 600; }
+.hj-dialog-message { margin: 0; color: #424a53; line-height: 1.45; white-space: pre-line; }
+.hj-dialog-field { display: flex; flex-direction: column; gap: 6px; }
+.hj-dialog-label { font-size: 13px; font-weight: 600; }
+.hj-dialog-input {
+    width: 100%; box-sizing: border-box; padding: 7px 10px;
+    border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit;
+    font: inherit;
+}
+textarea.hj-dialog-input { resize: vertical; min-height: 84px; }
+.hj-dialog-input:focus { outline: 2px solid #0969da; outline-offset: -1px; border-color: #0969da; }
+.hj-dialog-error {
+    margin: 0; padding: 8px 10px; border-radius: 6px;
+    background: #ffebe9; color: #82071e; border: 1px solid #ffcecb;
+}
+.hj-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.hj-dialog-btn {
+    padding: 6px 14px; border: 1px solid #d0d7de; border-radius: 6px;
+    background: #fff; color: #1f2328; font: inherit; cursor: pointer;
+}
+.hj-dialog-btn:hover:not(:disabled) { background: #f6f8fa; }
+.hj-dialog-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.hj-dialog-confirm { background: #1f883d; border-color: #1a7f37; color: #fff; }
+.hj-dialog-confirm:hover:not(:disabled) { background: #1a7f37; }
+.hj-dialog-danger .hj-dialog-confirm { background: #cf222e; border-color: #a40e26; }
+.hj-dialog-danger .hj-dialog-confirm:hover:not(:disabled) { background: #a40e26; }

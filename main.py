@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 
 from WebServer import WebServer
-from WebServer.tableviewer import selectFilter
+from WebServer.tableviewer import dateFilter, selectFilter
 
 app = WebServer(port=8080)
 # type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
@@ -41,7 +41,18 @@ app.addTableViewer('/api/forsorgshjem', table="Forsorgshjem",
              "Privat tilbud": selectFilter("Privat tilbud", allLabel="-- Alle --"),
              "Fritaget": selectFilter("Fritaget", allLabel="-- Alle --")},
     validate=validate_forsorgshjem,
-    edit=["admin"])
+    edit=["admin"], delete=["admin"])
+
+# Every edit and delete made in a table viewer, with old and new values.
+app.addPath('/ledger', 'public/ledger.html', public=True)  # empty frame; its data needs an admin
+app.addTableViewer('/api/ledger', table="Ledger", roles=["admin"], readOnly=True,
+    columns={"#": "Id", "Tidspunkt": "At", "Bruger": "Username", "Handling": "ChangeType",
+             "Tabel": "TableName", "Række": "RowKey", "Før": "OldValues", "Efter": "NewValues",
+             "Begrundelse": "Reason"},
+    filters={"Vælg tabel": selectFilter("TableName", allLabel="-- Alle tabeller --"),
+             "Handling": selectFilter("ChangeType", allLabel="-- Alle --"),
+             "Dag": dateFilter("At", default=None)},
+    sort=("Id", "desc"))
 
 # Create an admin user
 # python -m WebServer createuser admin --role admin

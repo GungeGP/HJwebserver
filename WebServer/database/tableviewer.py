@@ -10,6 +10,8 @@ here that puts a name into SQL first checks it against the live schema
 a request; the check is what keeps them from being an injection vector.
 """
 
+import datetime as _dt
+
 from WebServer.database.core import describe, execute, fetch_all, fetch_one, get_database_type
 
 _CAST_TYPE = {"sqlite": "TEXT", "mssql": "NVARCHAR(MAX)", "mysql": "CHAR"}
@@ -318,8 +320,11 @@ def get_row(table, key_values):
     return vars(row) if row else None
 
 
-def update_row(table, key_values, changes):
-    """UPDATE one row of `table`, identified by key_values ({column: value})."""
+# The *_sql builders return (sql, params) without running anything, so a
+# change and its Ledger entry can go through execute_all() as one transaction.
+
+def update_row_sql(table, key_values, changes):
+    """UPDATE of one row of `table`, identified by key_values ({column: value})."""
     if not key_values:
         raise ValueError(f"No key given for '{table}'; can't tell which row to update")
     if not changes:
@@ -327,18 +332,53 @@ def update_row(table, key_values, changes):
     _require_columns(table, list(key_values) + list(changes))
     set_clause = ", ".join(f"{quote_name(col)} = ?" for col in changes)
     where_clause = " AND ".join(f"{quote_name(col)} = ?" for col in key_values)
-    execute(f"UPDATE {quote_name(table)} SET {set_clause} WHERE {where_clause}",
+    return (f"UPDATE {quote_name(table)} SET {set_clause} WHERE {where_clause}",
             list(changes.values()) + list(key_values.values()))
 
 
-def insert_row(table, values):
-    """INSERT one row into `table`."""
+def insert_row_sql(table, values):
+    """INSERT of one row into `table`."""
     if not values:
         raise ValueError("Nothing to insert")
     _require_columns(table, list(values))
     columns = ", ".join(quote_name(c) for c in values)
     placeholders = ", ".join("?" for _ in values)
-    execute(f"INSERT INTO {quote_name(table)} ({columns}) VALUES ({placeholders})", list(values.values()))
+    return f"INSERT INTO {quote_name(table)} ({columns}) VALUES ({placeholders})", list(values.values())
+
+
+def delete_row_sql(table, key_values):
+    """DELETE of the one row of `table` identified by key_values ({column: value})."""
+    if not key_values:
+        raise ValueError(f"No key given for '{table}'; can't tell which row to delete")
+    _require_columns(table, list(key_values))
+    where = " AND ".join(f"{quote_name(col)} = ?" for col in key_values)
+    return f"DELETE FROM {quote_name(table)} WHERE {where}", list(key_values.values())
+
+
+def ledger_sql(username, change_type, table, row_key=None, old_values=None, new_values=None, reason=None):
+    """INSERT of one Ledger entry. change_type is "edited", "created" or
+    "deleted"; row_key, old_values and new_values are JSON text."""
+    at = _dt.datetime.now().replace(microsecond=0)
+    if get_database_type() == "sqlite":
+        at = at.isoformat(sep=" ")   # sqlite has no datetime type
+    return ("INSERT INTO Ledger (At, Username, ChangeType, TableName, RowKey, OldValues, NewValues, Reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [at, username, change_type, table, row_key, old_values, new_values, reason])
+
+
+def update_row(table, key_values, changes):
+    """UPDATE one row of `table`, identified by key_values ({column: value})."""
+    execute(*update_row_sql(table, key_values, changes))
+
+
+def insert_row(table, values):
+    """INSERT one row into `table`."""
+    execute(*insert_row_sql(table, values))
+
+
+def delete_row(table, key_values):
+    """DELETE the one row of `table` identified by key_values ({column: value})."""
+    execute(*delete_row_sql(table, key_values))
 
 
 def lookup_options(table, id_column, label_column, search=None, limit=None):

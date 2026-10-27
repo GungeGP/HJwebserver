@@ -16,7 +16,7 @@ class TableViewerMixin:
     def addTableViewer(self, url_path, table=None, roles=None, public=False, limit=40,
                        readOnly=False, edit=None, columns=None, editable=None, lookups=None,
                        related=None, computed=None, filters=None, types=None, validate=None,
-                       primaryKey=None, query=None):
+                       primaryKey=None, query=None, delete=None, sort=None):
         """Show a database table (or view, or query) in a searchable, sortable,
         pageable, editable table. In your HTML you only need:
 
@@ -47,13 +47,19 @@ class TableViewerMixin:
                       column type (needed on sqlite, where dates are plain text).
                       One of text, number, bool, date, time, datetime.
           query       a SELECT to show instead of a table. Always read-only.
+          sort        starting order until a header is clicked: "Column" or
+                      ("Column", "desc"). Default: the primary key, ascending.
 
         Who may do what:
           roles/public  who may view - same as route(). Default: logged in.
           edit          roles allowed to edit, e.g. ["admin"]. None: anyone
                         logged in. Editing always requires login, even with
                         public=True, and is impossible without settings(auth=True).
-          readOnly      True disables editing entirely.
+          delete        roles allowed to delete rows, e.g. ["admin"], or True for
+                        anyone logged in. Default None: no deleting. Each row
+                        gets a trash button that asks for a reason, which is
+                        recorded in the audit log with the row's key.
+          readOnly      True disables editing and deleting entirely.
           editable      which shown columns can be edited. Default: every
                         shown column that isn't a key, join column, or computed.
           primaryKey    key columns for a view, which has none in the schema
@@ -63,16 +69,19 @@ class TableViewerMixin:
           limit         rows per page, and the most a page may ask for.
 
         Routes: GET url_path (a page of rows), plus when editing is possible
-        PUT url_path (save one row) and GET url_path/options (lookup search).
+        PUT url_path (save one row) and GET url_path/options (lookup search),
+        and with delete= POST url_path/delete ({"keys": ..., "reason": ...}).
         """
         from WebServer.tableviewer import TableViewer
 
         viewer = TableViewer(table=table, columns=columns, editable=editable, lookups=lookups,
                              related=related, computed=computed, filters=filters, types=types,
-                             validate=validate, primaryKey=primaryKey, query=query)
+                             validate=validate, primaryKey=primaryKey, query=query, sort=sort)
         # No auth means no identity to check a role against, so no editing at
         # all rather than silently letting everyone edit.
         editing_enabled = bool(self.auth) and not readOnly and not query
+        deleting_enabled = bool(self.auth) and bool(delete) and not readOnly and not query
+        delete_roles = list(delete) if isinstance(delete, (list, tuple, set)) else None
 
         def can_edit(request):
             if not editing_enabled:
@@ -81,6 +90,12 @@ class TableViewerMixin:
             if not user:
                 return False
             return not edit or user.get('role') in edit
+
+        def can_delete(request):
+            user = getattr(request, 'user', None)
+            if not deleting_enabled or not user:
+                return False
+            return not delete_roles or user.get('role') in delete_roles
 
         def query_of(request):
             # keep_blank_values: "f0=" means "filter cleared", not "use the default".
@@ -105,7 +120,21 @@ class TableViewerMixin:
             except ValueError as e:
                 send_json(request, 404, {"error": str(e)})
                 return
+            payload["canDelete"] = can_delete(request) and bool(payload["primaryKey"])
             send_json(request, 200, payload)
+
+        if deleting_enabled:
+            # Like editing, deleting never inherits public=True.
+            @self.route('POST', url_path.rstrip('/') + '/delete', public=False, roles=delete_roles)
+            def table_viewer_delete_route(request):
+                body = request.body if isinstance(request.body, dict) else {}
+                try:
+                    detail = viewer.delete(body, (getattr(request, 'user', None) or {}).get('username'))
+                except ValueError as e:
+                    send_json(request, 400, {"error": str(e)})
+                    return
+                self.audit(request, "table_row_deleted", detail)
+                send_json(request, 200, {"ok": True, "action": "deleted"})
 
         if editing_enabled:
             # Editing routes never inherit public=True.
@@ -113,7 +142,7 @@ class TableViewerMixin:
             def table_viewer_update_route(request):
                 body = request.body if isinstance(request.body, dict) else {}
                 try:
-                    action, detail = viewer.save(body)
+                    action, detail = viewer.save(body, (getattr(request, 'user', None) or {}).get('username'))
                 except ValueError as e:
                     send_json(request, 400, {"error": str(e)})
                     return

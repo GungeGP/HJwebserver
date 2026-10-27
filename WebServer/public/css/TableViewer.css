@@ -91,6 +91,12 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
 .tableviewer-save-btn { border-color: #1a7f37; color: #1a7f37; }
 .tableviewer-save-btn:hover:not(:disabled) { background: #dafbe1; }
 .tableviewer-cancel-btn { margin-left: 6px; }
+.tableviewer-delete-btn {
+    margin-left: 4px; padding: 4px 6px; color: #cf222e; vertical-align: top;
+    line-height: 0;
+}
+.tableviewer-delete-btn svg { display: block; }
+.tableviewer-delete-btn:hover:not(:disabled) { background: #ffebe9; border-color: #cf222e; }
 .tableviewer-edit-input {
     width: 100%; min-width: 70px; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
     border: 1px solid #0969da; border-radius: 4px; font-family: inherit;
