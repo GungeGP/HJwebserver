@@ -125,7 +125,7 @@ def to_json(value):
 
 
 def _ledger_json(values):
-    """{column: value} as JSON text for the Ledger, e.g. {"Navn": "Mette Holm"}."""
+    """{column: value} as JSON text for the tableviewLedger, e.g. {"Navn": "Mette Holm"}."""
     if values is None:
         return None
     return json.dumps({k: to_json(v) for k, v in values.items()}, ensure_ascii=False, default=str)
@@ -177,7 +177,7 @@ class TableViewer:
 
     def __init__(self, table=None, columns=None, editable=None, lookups=None, related=None,
                  computed=None, filters=None, types=None, validate=None, primaryKey=None,
-                 query=None, sort=None):
+                 query=None):
         if not table and not query:
             raise ValueError("addTableViewer needs either table= or query=")
         if query and (related or lookups):
@@ -185,14 +185,10 @@ class TableViewer:
         for kind in (types or {}).values():
             if kind not in KINDS:
                 raise ValueError(f"Unknown type '{kind}' in types=; use one of {', '.join(KINDS)}")
-        if isinstance(sort, str):
-            sort = (sort, "asc")
-        if sort is not None and (len(sort) != 2 or str(sort[1]).lower() not in ("asc", "desc")):
-            raise ValueError('sort= must be "Column" or ("Column", "asc" | "desc")')
         self.config = {
             "table": table, "columns": columns, "editable": editable, "lookups": lookups or {},
             "related": related, "computed": computed or {}, "filters": filters or {},
-            "types": types or {}, "primaryKey": primaryKey, "query": query, "sort": sort,
+            "types": types or {}, "primaryKey": primaryKey, "query": query,
         }
         self.validate = validate
         self._spec = None
@@ -502,12 +498,7 @@ class TableViewer:
                 where.append("(" + " OR ".join(like) + ")")
                 where_params.extend([f"{search}%"] * len(like))
 
-        if not sort and self.config["sort"]:
-            # No column clicked yet: the viewer's own sort= (label or column name).
-            wanted, sort_dir = self.config["sort"]
-            sort_col = next((c for c in shown if str(wanted).lower() in (c["key"].lower(), c["column"].lower())), None)
-        else:
-            sort_col = next((c for c in shown if sort and c["key"] == sort), None)
+        sort_col = next((c for c in shown if sort and c["key"] == sort), None)
         direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
         base_key = spec["base"]["key"]
         if sort_col:
@@ -637,15 +628,15 @@ class TableViewer:
     # --- PUT: save one row --------------------------------------------------
 
     def save(self, body, username=None):
-        """Apply one row's edits. Returns (action, detail) on success, raises
-        ValueError with a message for the user otherwise.
+        """Apply one row's edits. Returns "edited" or "created" on success,
+        raises ValueError with a message for the user otherwise.
 
         An edit goes to whichever table owns each column. If the row has no
         related row yet (a "-" row), the related values are inserted instead,
         with the join column taken from the base row and any related-table
         filter (like the selected day) filled in from the current filters.
 
-        Every change is written to the Ledger (old and new values, by
+        Every change is written to the tableviewLedger (old and new values, by
         `username`) in the same transaction as the change itself.
         """
         spec = self.spec()
@@ -728,18 +719,15 @@ class TableViewer:
             print(f"[ tableviewer ] save failed: {e!r}")
             raise ValueError("The database rejected the change") from None
 
-        table = related["table"] if inserting else base["table"]
-        action = "created" if inserting else "edited"
-        return action, f"table={table} key={base_key if not inserting else insert_values}"
+        return "created" if inserting else "edited"
 
     # --- POST /delete: remove one row ---------------------------------------
 
     def delete(self, body, username=None):
-        """Delete one base-table row. A reason is required; the returned
-        detail (table, key and reason) is what goes into the audit log, and
-        the whole row as it was goes into the Ledger with the reason, in the
-        same transaction as the delete. Raises ValueError with a message for
-        the user otherwise."""
+        """Delete one base-table row. A reason is required; the whole row as
+        it was goes into the tableviewLedger with the reason, in the same
+        transaction as the delete. Raises ValueError with a message for the
+        user otherwise."""
         spec = self.spec()
         base = spec["base"]
         if spec["query"] or not base["key"]:
@@ -766,11 +754,10 @@ class TableViewer:
         except Exception as e:
             print(f"[ tableviewer ] delete failed: {e!r}")
             raise ValueError("The database rejected the delete") from None
-        return f"table={base['table']} key={key} reason={reason!r}"
 
     @staticmethod
     def _ledger_edit(username, table, key, old_row, changes):
-        """The Ledger entry for an edit: old and new value of every column
+        """The tableviewLedger entry for an edit: old and new value of every column
         whose value really changed. Empty list when nothing did."""
         old_row = old_row or {}
         changed = [c for c in changes if to_json(old_row.get(c)) != to_json(changes[c])]

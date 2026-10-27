@@ -31,10 +31,11 @@ Users            (Id, Username, PasswordHash, Role, Disabled, MustChangePassword
 Sessions         (Jti, Username, CreatedAt, ExpiresAt, LastSeen)
 LoginAttempts    (AttemptKey, FailCount, LastAt, LockedUntil, LastUser)
 AuditLog         (Id, At, Username, Event, Detail, Ip)
-WorkTimeEntries  (Id, Username, WorkDate, StartTime, EndTime)
+tableviewLedger  (Id, At, Username, ChangeType, TableName, RowKey, OldValues, NewValues, Reason)
 ```
 
-The first four are used by the login system. Tables are created only if
+The first four are used by the login system; `tableviewLedger` records every change
+made through a table viewer (see [tableviewer.md](tableviewer.md#tableviewledger-what-exactly-changed)). Tables are created only if
 missing; columns added by newer versions (`Role`, `Disabled`, ... ) are added to
 existing tables with `ALTER TABLE ... ADD`, so a database from an older version
 keeps working. Nothing is ever dropped or renamed.
@@ -122,4 +123,3 @@ Used by the framework itself, but you can call them:
 | `get_user_by_username(username)` | row with `Username`, `PasswordHash`, or `None` |
 | `create_user(username, password_hash)` | inserts a user. Prefer `app.createUser`, which hashes the password for you |
 | `update_user_password(username, password_hash)` | prefer `app.setPassword` |
-| `save_work_time(username, work_date, start_time, end_time)` | inserts a `WorkTimeEntries` row |

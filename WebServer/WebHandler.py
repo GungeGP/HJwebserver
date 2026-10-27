@@ -84,6 +84,10 @@ class WebHandler(BaseHTTPRequestHandler):
 
         roles = getattr(handler_function, '_hj_roles', None)
         if roles and user.get("role") not in roles:
+            from WebServer.auth import audit
+            # Path without the query string: searches can hold personal data.
+            audit("access_denied", user.get("username"),
+                  f"{method} {self.path.split('?')[0]} needs {' or '.join(roles)}, has {user.get('role')}", self)
             return self._deny(403, {"error": "Forbidden: this requires role " + " or ".join(roles) + "."},
                               login_shell=False, html=wants_html)
 

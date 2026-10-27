@@ -207,8 +207,6 @@ class TableViewer {
             this.totalPages = data.totalPages ?? 1;
             this.page = data.page ?? this.page;
             this.primaryKey = data.primaryKey || [];
-            // The server's starting order (sort=), so the header shows its arrow.
-            if (!this.sort && data.sort) { this.sort = data.sort; this.sortDir = data.sortDir || 'asc'; }
             this.canEdit = Boolean(data.canEdit);
             this.canDelete = Boolean(data.canDelete) && typeof globalThis.hjDialog === 'object';
             if (!data.columnsMeta && this.canEdit) {

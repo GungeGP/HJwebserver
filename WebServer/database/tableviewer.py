@@ -321,7 +321,7 @@ def get_row(table, key_values):
 
 
 # The *_sql builders return (sql, params) without running anything, so a
-# change and its Ledger entry can go through execute_all() as one transaction.
+# change and its tableviewLedger entry can go through execute_all() as one transaction.
 
 def update_row_sql(table, key_values, changes):
     """UPDATE of one row of `table`, identified by key_values ({column: value})."""
@@ -356,12 +356,12 @@ def delete_row_sql(table, key_values):
 
 
 def ledger_sql(username, change_type, table, row_key=None, old_values=None, new_values=None, reason=None):
-    """INSERT of one Ledger entry. change_type is "edited", "created" or
+    """INSERT of one tableviewLedger entry. change_type is "edited", "created" or
     "deleted"; row_key, old_values and new_values are JSON text."""
     at = _dt.datetime.now().replace(microsecond=0)
     if get_database_type() == "sqlite":
         at = at.isoformat(sep=" ")   # sqlite has no datetime type
-    return ("INSERT INTO Ledger (At, Username, ChangeType, TableName, RowKey, OldValues, NewValues, Reason) "
+    return ("INSERT INTO tableviewLedger (At, Username, ChangeType, TableName, RowKey, OldValues, NewValues, Reason) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [at, username, change_type, table, row_key, old_values, new_values, reason])
 

@@ -165,7 +165,7 @@ class ServerMixin:
         user:         username (mysql, or mssql SQL-auth; omit for mssql Windows auth)
         password:     password for `user`
         port:         optional port override
-        createTables: create the Users / WorkTimeEntries tables if they don't exist (default True)
+        createTables: create the framework tables (Users, Sessions, AuditLog, ...) if they don't exist (default True)
         """
         createConnection(type=type, server=server, dbName=dbName, user=user, password=password, port=port)
         if createTables:

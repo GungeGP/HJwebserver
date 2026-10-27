@@ -18,8 +18,7 @@ That's the whole setup. The script and styles are loaded automatically once
 
 - **Search** matches the start of any value. `name=value` searches one column
   exactly (`id=1`, `afdeling=105 IT`).
-- **Sorting**: click a column header; click again to reverse. `sort="Navn"` or
-  `sort=("Id", "desc")` sets the order before anything is clicked.
+- **Sorting**: click a column header; click again to reverse.
 - **Paging**: `limit` rows per page. A page can ask for fewer with
   `data-tableviewer-limit="20"`, never more.
 - **Editing**: an Edit button per row for users allowed to edit. Others don't
@@ -180,10 +179,8 @@ Each row gets a red trash button next to Edit. It opens an
 [`hjDialog`](frontend.md#dialogjs--popups-hjdialog) asking for a reason; the
 row is only deleted once a reason is typed and confirmed.
 
-- The row disappears from the table, but the [Ledger](#ledger-what-exactly-changed)
+- The row disappears from the table, but the [tableviewLedger](#tableviewledger-what-exactly-changed)
   keeps every value it had, with the reason, so it can be put back by hand.
-  The audit log records it as `table_row_deleted` with the table, the key and
-  the reason.
 - The reason is required (the server refuses an empty one) and at most 500
   characters.
 - Only the base table's row is deleted, never a related row. If the database
@@ -192,9 +189,9 @@ row is only deleted once a reason is typed and confirmed.
 - Like editing, deleting needs `settings(auth=True)` and a primary key, and
   never works for `query=` viewers or with `readOnly=True`.
 
-## Ledger: what exactly changed
+## tableviewLedger: what exactly changed
 
-Every change made through a table viewer is written to the `Ledger` table,
+Every change made through a table viewer is written to the `tableviewLedger` table,
 in the same transaction as the change itself: if the ledger entry can't be
 written, the change isn't saved either. The table is created automatically
 with the framework's other tables.
@@ -216,12 +213,7 @@ entry.
 To undo a mistake, find the entry and write the `OldValues` back, either in
 the table viewer or with SQL. A deleted row can be inserted again from its
 `OldValues` (with `SET IDENTITY_INSERT ... ON` on mssql to keep its old id).
-
-To read it in a page, it's an ordinary table:
-
-```python
-app.addTableViewer('/api/ledger', table="Ledger", roles=["admin"], readOnly=True, sort=("Id", "desc"))
-```
+The ledger is read in the database itself (SSMS); it has no page.
 
 Only changes made through a table viewer are recorded. Changes made directly
 in the database (SSMS, scripts) are not.
@@ -276,8 +268,8 @@ don't need this; the column types come from the schema.
 | `POST <url>/delete` | `delete=` roles | delete one row: `{"keys": {"base": {...}}, "reason": "..."}` |
 
 The PUT and options routes only exist when editing is possible, the delete
-route only with `delete=`. Saves are recorded in the audit log as
-`table_row_edited` / `table_row_created`, deletes as `table_row_deleted`.
+route only with `delete=`. Saves and deletes are recorded in
+`tableviewLedger`, not in the audit log.
 
 Table and column names are checked against the database schema before they're
 used in any SQL, and the result is cached for 60 seconds. If you change the
