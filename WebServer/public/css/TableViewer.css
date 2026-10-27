@@ -92,10 +92,10 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
 .tableviewer-save-btn:hover:not(:disabled) { background: #dafbe1; }
 .tableviewer-cancel-btn { margin-left: 6px; }
 .tableviewer-delete-btn {
-    margin-left: 4px; padding: 4px 6px; color: #cf222e; vertical-align: top;
+    margin-left: 4px; padding: 4px; color: #cf222e; vertical-align: top;
     line-height: 0;
 }
-.tableviewer-delete-btn svg { display: block; }
+.tableviewer-delete-btn svg { display: block; width: 15px; height: 15px; }   /* square, as tall as Edit */
 .tableviewer-delete-btn:hover:not(:disabled) { background: #ffebe9; border-color: #cf222e; }
 .tableviewer-edit-input {
     width: 100%; min-width: 70px; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
