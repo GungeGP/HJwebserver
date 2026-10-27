@@ -52,10 +52,20 @@
     .tableviewer-progress::after { animation: none; left: 0; width: 100%; opacity: 0.6; }
 }
 table.tableviewer { width: 100%; border-collapse: collapse; }
+/* Body cells wrap so many columns share the width instead of scrolling
+   sideways; headers and values without spaces (dates, numbers) never do. */
 table.tableviewer th, table.tableviewer td {
-    padding: 8px 12px; text-align: left; border-bottom: 1px solid #d0d7de;
-    white-space: nowrap;
+    padding: 6px 8px; text-align: left; border-bottom: 1px solid #d0d7de;
+    vertical-align: top; overflow-wrap: break-word;
 }
+table.tableviewer th, table.tableviewer td.tableviewer-nowrap { white-space: nowrap; }
+table.tableviewer th.tableviewer-tight { width: 1%; }
+/* Fields have their own padding, so the row being edited gives up most of
+   the cell's: a one-line value then still fits a column sized to it. */
+table.tableviewer tr.tableviewer-editing td { padding-left: 2px; padding-right: 2px; }
+table.tableviewer tr.tableviewer-editing .tableviewer-edit-input { padding-left: 4px; padding-right: 4px; }
+table.tableviewer tr.tableviewer-editing .tableviewer-edit-btn { padding: 4px 6px; }
+table.tableviewer tr.tableviewer-editing .tableviewer-cancel-btn { margin-left: 4px; }
 table.tableviewer thead th {
     background: #f6f8fa; font-weight: 600; user-select: none;
     position: sticky; top: 0; z-index: 2;
@@ -82,9 +92,13 @@ table.tableviewer td.tableviewer-empty, table.tableviewer td.tableviewer-loading
 .tableviewer-save-btn:hover:not(:disabled) { background: #dafbe1; }
 .tableviewer-cancel-btn { margin-left: 6px; }
 .tableviewer-edit-input {
-    width: 100%; min-width: 120px; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
+    width: 100%; min-width: 70px; box-sizing: border-box; padding: 3px 6px; font-size: 13px;
     border: 1px solid #0969da; border-radius: 4px; font-family: inherit;
 }
+/* No calendar icon (clicking the field opens it), so a date field is no
+   wider than the date it shows. */
+.tableviewer-edit-input[type="date"] { width: 84px; min-width: 0; padding: 3px; font-size: 12px; cursor: pointer; }
+.tableviewer-edit-input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
 .tableviewer-edit-input[type="datetime-local"] { min-width: 190px; }
 .tableviewer-edit-check { width: 16px; height: 16px; accent-color: #0969da; }
 .tableviewer-combo { position: relative; min-width: 200px; }

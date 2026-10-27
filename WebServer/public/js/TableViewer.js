@@ -404,6 +404,8 @@ class TableViewer {
             cell.textContent = text;
             cell.classList.remove('tableviewer-null');
         }
+        // One-word values (dates, CPR, numbers) would otherwise break at "-".
+        cell.classList.toggle('tableviewer-nowrap', text === null || !/\s/.test(text));
     }
 
     _renderTable() {
@@ -465,6 +467,14 @@ class TableViewer {
                 actionCell.appendChild(editBtn);
             }
         });
+
+        // Columns where every value fits on one line (CPR, dates, amounts)
+        // shrink to their content; columns of wrapping text take the rest.
+        Array.from(headRow.cells).forEach((th, i) => {
+            if (i >= this.columns.length) return;
+            const tight = Array.from(body.rows).every(r => r.cells[i].classList.contains('tableviewer-nowrap'));
+            th.classList.toggle('tableviewer-tight', tight);
+        });
     }
 
     // --- editing ------------------------------------------------------------
@@ -474,6 +484,7 @@ class TableViewer {
         const cells = Array.from(tr.cells);
         const editors = {};
         const save = () => this._saveRowEdit(row, editors, saveBtn, cancelBtn);
+        tr.classList.add('tableviewer-editing');
 
         this.columns.forEach((key, i) => {
             const meta = this.columnsMeta[key] || {};
@@ -555,6 +566,11 @@ class TableViewer {
         input.className = 'tableviewer-edit-input';
         input.type = { date: 'date', time: 'time', datetime: 'datetime-local', number: 'number' }[meta.kind] || 'text';
         if (meta.kind === 'number') input.step = 'any';
+        // The calendar icon is hidden to keep the row narrow (TableViewer.css),
+        // so clicking the field opens the calendar instead.
+        if (meta.kind === 'date') {
+            input.addEventListener('click', () => { try { input.showPicker(); } catch (e) { /* unsupported */ } });
+        }
         const original = _tvInputValue(value, meta.kind);
         input.value = original;
         return {

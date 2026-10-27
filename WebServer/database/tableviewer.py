@@ -15,6 +15,19 @@ from WebServer.database.core import describe, execute, fetch_all, fetch_one, get
 _CAST_TYPE = {"sqlite": "TEXT", "mssql": "NVARCHAR(MAX)", "mysql": "CHAR"}
 
 
+def quote_name(name):
+    """`name` quoted as a table/column identifier for the configured database,
+    so names with spaces or symbols ("Privat tilbud", "Mail til/fra B&F")
+    work. Quoting isn't validation - names must still be checked first."""
+    name = str(name)
+    db_type = get_database_type()
+    if db_type == "mssql":
+        return "[" + name.replace("]", "]]") + "]"
+    if db_type == "mysql":
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
+
+
 def get_table_names():
     """All user tables and views in the configured database, sorted by name.
 
@@ -45,7 +58,7 @@ def get_table_columns(table):
 
     db_type = get_database_type()
     if db_type == "sqlite":
-        return [{"name": r.name, "type": r.type} for r in fetch_all(f"PRAGMA table_info({table})")]
+        return [{"name": r.name, "type": r.type} for r in fetch_all(f"PRAGMA table_info({quote_name(table)})")]
     if db_type == "mssql":
         rows = fetch_all(
             "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
@@ -66,11 +79,11 @@ def get_table_rows(table, limit=200):
     column order, which is what TableViewer defaults its displayed columns to.
     """
     columns = [c["name"] for c in get_table_columns(table)]
-    column_list = ", ".join(columns)
+    column_list = ", ".join(quote_name(c) for c in columns)
     if get_database_type() == "mssql":
-        sql = f"SELECT TOP {int(limit)} {column_list} FROM {table}"
+        sql = f"SELECT TOP {int(limit)} {column_list} FROM {quote_name(table)}"
     else:
-        sql = f"SELECT {column_list} FROM {table} LIMIT {int(limit)}"
+        sql = f"SELECT {column_list} FROM {quote_name(table)} LIMIT {int(limit)}"
     return [vars(row) for row in fetch_all(sql)]
 
 
@@ -91,7 +104,8 @@ def get_table_page(table, page=1, per_page=40, search=None, sort=None, sort_dir=
     """
     db_type = get_database_type()
     column_names = [c["name"] for c in get_table_columns(table)]
-    column_list = ", ".join(column_names)
+    column_list = ", ".join(quote_name(c) for c in column_names)
+    table_sql = quote_name(table)
 
     where_sql = ""
     params = []
@@ -102,25 +116,25 @@ def get_table_page(table, page=1, per_page=40, search=None, sort=None, sort_dir=
         exact_column = {c.lower(): c for c in column_names}.get(field.strip().lower()) if sep else None
 
         if exact_column:
-            where_sql = f"WHERE CAST({exact_column} AS {cast}) = ?"
+            where_sql = f"WHERE CAST({quote_name(exact_column)} AS {cast}) = ?"
             params = [value.strip()]
         else:
-            conditions = [f"CAST({c} AS {cast}) LIKE ?" for c in column_names]
+            conditions = [f"CAST({quote_name(c)} AS {cast}) LIKE ?" for c in column_names]
             where_sql = "WHERE " + " OR ".join(conditions)
             params = [f"{search}%"] * len(column_names)  # prefix match, not "contains"
 
-    sort_col = sort if sort in column_names else column_names[0]
+    sort_col = quote_name(sort if sort in column_names else column_names[0])
     sort_dir = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
 
-    total = fetch_one(f"SELECT COUNT(*) AS N FROM {table} {where_sql}", params).N
+    total = fetch_one(f"SELECT COUNT(*) AS N FROM {table_sql} {where_sql}", params).N
 
     per_page = max(1, int(per_page))
     offset = max(0, (int(page) - 1) * per_page)
     if db_type == "mssql":
-        sql = (f"SELECT {column_list} FROM {table} {where_sql} "
+        sql = (f"SELECT {column_list} FROM {table_sql} {where_sql} "
                f"ORDER BY {sort_col} {sort_dir} OFFSET ? ROWS FETCH NEXT ? ROWS ONLY")
     else:
-        sql = (f"SELECT {column_list} FROM {table} {where_sql} "
+        sql = (f"SELECT {column_list} FROM {table_sql} {where_sql} "
                f"ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?")
     rows = fetch_all(sql, params + [offset, per_page] if db_type == "mssql" else params + [per_page, offset])
 
@@ -137,7 +151,7 @@ def get_primary_key_columns(table):
 
     db_type = get_database_type()
     if db_type == "sqlite":
-        rows = fetch_all(f"PRAGMA table_info({table})")
+        rows = fetch_all(f"PRAGMA table_info({quote_name(table)})")
         return [r.name for r in sorted((r for r in rows if r.pk), key=lambda r: r.pk)]
     if db_type == "mssql":
         rows = fetch_all(
@@ -175,10 +189,10 @@ def update_table_row(table, pk_values, changes):
     if not changes:
         raise ValueError("No editable columns in the request")
 
-    set_clause = ", ".join(f"{col} = ?" for col in changes)
-    where_clause = " AND ".join(f"{col} = ?" for col in pk_cols)
+    set_clause = ", ".join(f"{quote_name(col)} = ?" for col in changes)
+    where_clause = " AND ".join(f"{quote_name(col)} = ?" for col in pk_cols)
     params = list(changes.values()) + [pk_values[col] for col in pk_cols]
-    execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}", params)
+    execute(f"UPDATE {quote_name(table)} SET {set_clause} WHERE {where_clause}", params)
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +216,7 @@ def get_foreign_keys(table):
     db_type = get_database_type()
     found = {}
     if db_type == "sqlite":
-        rows = [vars(r) for r in fetch_all(f"PRAGMA foreign_key_list({table})")]
+        rows = [vars(r) for r in fetch_all(f"PRAGMA foreign_key_list({quote_name(table)})")]
         per_constraint = {}
         for r in rows:
             per_constraint.setdefault(r["id"], []).append(r)
@@ -247,7 +261,7 @@ def get_foreign_keys(table):
 def count_rows(table):
     if table not in get_table_names():
         raise ValueError(f"Unknown table '{table}'")
-    return fetch_one(f"SELECT COUNT(*) AS N FROM {table}").N
+    return fetch_one(f"SELECT COUNT(*) AS N FROM {quote_name(table)}").N
 
 
 def text_expr(expr):
@@ -299,8 +313,8 @@ def describe_query(sql):
 def get_row(table, key_values):
     """The row of `table` whose key columns equal key_values, as a dict, or None."""
     _require_columns(table, list(key_values))
-    where = " AND ".join(f"{col} = ?" for col in key_values)
-    row = fetch_one(f"SELECT * FROM {table} WHERE {where}", list(key_values.values()))
+    where = " AND ".join(f"{quote_name(col)} = ?" for col in key_values)
+    row = fetch_one(f"SELECT * FROM {quote_name(table)} WHERE {where}", list(key_values.values()))
     return vars(row) if row else None
 
 
@@ -311,9 +325,9 @@ def update_row(table, key_values, changes):
     if not changes:
         raise ValueError("No editable columns in the request")
     _require_columns(table, list(key_values) + list(changes))
-    set_clause = ", ".join(f"{col} = ?" for col in changes)
-    where_clause = " AND ".join(f"{col} = ?" for col in key_values)
-    execute(f"UPDATE {table} SET {set_clause} WHERE {where_clause}",
+    set_clause = ", ".join(f"{quote_name(col)} = ?" for col in changes)
+    where_clause = " AND ".join(f"{quote_name(col)} = ?" for col in key_values)
+    execute(f"UPDATE {quote_name(table)} SET {set_clause} WHERE {where_clause}",
             list(changes.values()) + list(key_values.values()))
 
 
@@ -322,9 +336,9 @@ def insert_row(table, values):
     if not values:
         raise ValueError("Nothing to insert")
     _require_columns(table, list(values))
-    columns = ", ".join(values)
+    columns = ", ".join(quote_name(c) for c in values)
     placeholders = ", ".join("?" for _ in values)
-    execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", list(values.values()))
+    execute(f"INSERT INTO {quote_name(table)} ({columns}) VALUES ({placeholders})", list(values.values()))
 
 
 def lookup_options(table, id_column, label_column, search=None, limit=None):
@@ -334,13 +348,14 @@ def lookup_options(table, id_column, label_column, search=None, limit=None):
     so "han" finds both "Hanne Olesen" and "Jens Hansen".
     """
     _require_columns(table, [id_column, label_column])
+    id_sql, label_sql = quote_name(id_column), quote_name(label_column)
     where_sql, params = "", []
     if search:
-        label = text_expr(label_column)
+        label = text_expr(label_sql)
         where_sql = f"WHERE {label} LIKE ? OR {label} LIKE ?"
         params = [f"{search}%", f"% {search}%"]
-    sql = _limit_sql(f"{id_column} AS v, {label_column} AS l",
-                     f"FROM {table} {where_sql} ORDER BY {label_column}", limit)
+    sql = _limit_sql(f"{id_sql} AS v, {label_sql} AS l",
+                     f"FROM {quote_name(table)} {where_sql} ORDER BY {label_sql}", limit)
     return [(r.v, r.l) for r in fetch_all(sql, params)]
 
 
@@ -348,8 +363,9 @@ def distinct_values(table, column, limit=200):
     """Distinct non-empty values of one column, sorted - options for a filter
     on a column that isn't a lookup."""
     _require_columns(table, [column])
+    column = quote_name(column)
     sql = _limit_sql(f"DISTINCT {column} AS v",
-                     f"FROM {table} WHERE {column} IS NOT NULL ORDER BY v", limit)
+                     f"FROM {quote_name(table)} WHERE {column} IS NOT NULL ORDER BY v", limit)
     return [r.v for r in fetch_all(sql)]
 
 

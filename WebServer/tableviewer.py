@@ -19,7 +19,7 @@ from decimal import Decimal
 from WebServer.database import (
     count_rows, describe_query, distinct_from, distinct_values, get_database_type,
     get_foreign_keys, get_primary_key_columns, get_row, get_table_columns,
-    get_table_names, insert_row, lookup_options, select_rows, text_expr, update_row,
+    get_table_names, insert_row, lookup_options, quote_name, select_rows, text_expr, update_row,
 )
 
 SELECT_MAX = 20       # lookups up to this many rows edit as a plain dropdown
@@ -211,7 +211,7 @@ class TableViewer:
         else:
             table = real_table(cfg["table"], "base")
             base = self._table_source(table, "b", cfg["primaryKey"])
-            from_head = f"{table} b"
+            from_head = f"{quote_name(table)} b"
 
         related = None
         join_on = []
@@ -225,7 +225,7 @@ class TableViewer:
             for rel_col, base_col in match.items():
                 rc, bc = self._col(related, rel_col), self._col(base, base_col)
                 related["match"][rc] = bc
-                join_on.append(f"r.{rc} = b.{bc}")
+                join_on.append(f"r.{quote_name(rc)} = b.{quote_name(bc)}")
             related["keepUnmatched"] = rel_cfg.get("keepUnmatched", True)
 
         # Columns, in display order: base, related, computed.
@@ -281,16 +281,16 @@ class TableViewer:
         self._mark_editable(columns, base, related)
         spec_filters = self._filters(base, related, explicit, real_table)
 
-        select = [f"{s['alias']}.{n} AS {s['sel'][n]}" for s in (base, related) if s for n in s["names"]]
-        select += [f"{lk['alias']}.{lk['label']} AS {lk['sel']}" for lk in lookups]
+        select = [f"{s['alias']}.{quote_name(n)} AS {s['sel'][n]}" for s in (base, related) if s for n in s["names"]]
+        select += [f"{lk['alias']}.{quote_name(lk['label'])} AS {lk['sel']}" for lk in lookups]
 
         from_sql = from_head
         if related:
             join = "LEFT JOIN" if related["keepUnmatched"] else "JOIN"
-            from_sql += f" {join} {related['table']} r ON {{related_on}}"
+            from_sql += f" {join} {quote_name(related['table'])} r ON {{related_on}}"
         for lk in lookups:
-            from_sql += (f" LEFT JOIN {lk['table']} {lk['alias']} "
-                         f"ON {lk['alias']}.{lk['id']} = {lk['owner_alias']}.{lk['column']}")
+            from_sql += (f" LEFT JOIN {quote_name(lk['table'])} {lk['alias']} "
+                         f"ON {lk['alias']}.{quote_name(lk['id'])} = {lk['owner_alias']}.{quote_name(lk['column'])}")
 
         return {"base": base, "related": related, "columns": columns, "lookups": lookups,
                 "filters": spec_filters, "select": ", ".join(select), "from": from_sql,
@@ -338,7 +338,7 @@ class TableViewer:
     @staticmethod
     def _column(label, source, name, owner):
         return {"key": str(label), "owner": owner, "column": name,
-                "expr": f"{source['alias']}.{name}", "alias": source["sel"][name],
+                "expr": f"{source['alias']}.{quote_name(name)}", "alias": source["sel"][name],
                 "kind": source["kinds"][name], "lookup": None, "editable": False}
 
     def _lookup_for(self, source, column, explicit, real_table, index):
@@ -429,7 +429,7 @@ class TableViewer:
                 owner, source = "related", related
             column = self._col(source, ref)
             entry = {"key": f"f{i}", "label": label, "kind": f["kind"], "owner": owner,
-                     "column": column, "expr": f"{source['alias']}.{column}",
+                     "column": column, "expr": f"{source['alias']}.{quote_name(column)}",
                      "col_kind": self.config["types"].get(column) or source["kinds"][column],
                      "source": source, "lookup": None}
             if f["kind"] == "date":
@@ -494,14 +494,14 @@ class TableViewer:
         if sort_col:
             primary = self._shown_expr(sort_col)
         elif base_key:
-            primary, direction = f"b.{base_key[0]}", "ASC"
+            primary, direction = f"b.{quote_name(base_key[0])}", "ASC"
         else:
             primary, direction = shown[0]["expr"], "ASC"
         # Keys as tie-breakers keep paging stable. Never repeat the sort
         # column itself - SQL Server rejects a column listed twice in ORDER BY.
-        tie = [f"b.{k}" for k in base_key]
+        tie = [f"b.{quote_name(k)}" for k in base_key]
         if spec["related"]:
-            tie += [f"r.{k}" for k in spec["related"]["key"]]
+            tie += [f"r.{quote_name(k)}" for k in spec["related"]["key"]]
         order = [f"{primary} {direction}"] + [f"{t} ASC" for t in tie if t != primary]
 
         from_sql = spec["from"].replace("{related_on}", " AND ".join(on)) if spec["related"] else spec["from"]
@@ -530,7 +530,7 @@ class TableViewer:
     def _shown_expr(c):
         """What a column shows - the lookup's label, not the stored id - which
         is also what search and sort should work on."""
-        return f"{c['lookup']['alias']}.{c['lookup']['label']}" if c["lookup"] else c["expr"]
+        return f"{c['lookup']['alias']}.{quote_name(c['lookup']['label'])}" if c["lookup"] else c["expr"]
 
     @staticmethod
     def _filter_value(f, raw):
