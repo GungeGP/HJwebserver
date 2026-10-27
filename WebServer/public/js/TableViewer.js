@@ -26,8 +26,8 @@ function _ensureTableViewerStyles() {
 // Trash can for the delete button; stroke follows the button's (red) text colour.
 const _TV_TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" '
     + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    + '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>'
-    + '<path d="M10 11v6"/><path d="M14 11v6"/></svg>';
+    + '<path d="M5 6h14"/><path d="M9.5 6V4h5v2"/><path d="M17 6l-1 14H8L7 6"/>'
+    + '<path d="M10.5 10v6"/><path d="M13.5 10v6"/></svg>';
 
 // --- value formatting -------------------------------------------------------
 // The server sends dates and times as ISO strings ("2025-11-10T07:30:00").
