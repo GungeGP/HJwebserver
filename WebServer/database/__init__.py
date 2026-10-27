@@ -78,4 +78,5 @@ from WebServer.database.tableviewer import (
     lookup_options,
     distinct_values,
     distinct_from,
+    quote_name,
 )
