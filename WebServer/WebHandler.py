@@ -55,12 +55,18 @@ class WebHandler(BaseHTTPRequestHandler):
 
     # --- authentication ---------------------------------------------------
 
-    def _authorize(self, method, handler_function=None):
+    def _authorize(self, method, handler_function=None, page=False):
         """Enforce authentication for this request.
 
         Returns True when the request may proceed (and sets ``self.user``).
         Otherwise writes a 401 response and returns False. When auth is
         disabled, or the route is marked ``public=True``, everything passes.
+
+        page=True (or a handler marked _hj_page) is an HTML page: opened in a
+        browser without a login, it is still sent, with self.user None, so
+        auth.js shows the login form on top of it. Everything the page loads
+        from the API still needs the login. Pages limited to roles= are not
+        shown this way; they get the plain login screen.
         """
         self.user = None
         if not getattr(self.server, 'auth', None):
@@ -71,10 +77,13 @@ class WebHandler(BaseHTTPRequestHandler):
         resolve_user = getattr(self.server, 'resolve_user', None)
         user = resolve_user(self) if resolve_user else None
         wants_html = method == 'GET' and 'text/html' in self.headers.get('Accept', '')
+        roles = getattr(handler_function, '_hj_roles', None)
 
         if not user:
-            # Browser navigation to a protected page gets the login shell; API
-            # calls get a JSON 401 that auth.js turns into the login overlay.
+            if wants_html and not roles and (page or getattr(handler_function, '_hj_page', False)):
+                return True   # the page itself, with the login form drawn over it
+            # Other browser navigation gets the login shell; API calls get a
+            # JSON 401 that auth.js turns into the login overlay.
             return self._deny(401, {"error": "Authentication required."}, login_shell=wants_html)
 
         # A pending password change blocks everything except the routes that
@@ -82,7 +91,6 @@ class WebHandler(BaseHTTPRequestHandler):
         if user.get("mustChangePassword") and not getattr(handler_function, '_hj_allow_pending_password', False):
             return self._deny(403, {"error": "password_change_required"}, login_shell=wants_html)
 
-        roles = getattr(handler_function, '_hj_roles', None)
         if roles and user.get("role") not in roles:
             from WebServer.auth import audit
             # Path without the query string: searches can hold personal data.
@@ -174,10 +182,11 @@ class WebHandler(BaseHTTPRequestHandler):
                 
         # 2. The Static Directory Fallback (and package assets)
         elif method == 'GET' and getattr(self.server, 'static_dir', None):
-            if not self._authorize(method):
-                return
-
             file_path = self._resolve_static(path)
+            is_page = bool(file_path and os.path.isfile(file_path)
+                           and mimetypes.guess_type(file_path)[0] == 'text/html')
+            if not self._authorize(method, page=is_page):
+                return
 
             if file_path and os.path.isfile(file_path):
                 file_name = os.path.basename(file_path)
