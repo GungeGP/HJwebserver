@@ -145,13 +145,17 @@ Present only when `settings(auth=True)`. On page load it:
    **login** and **change password**.
 2. If the session is valid the overlay stays hidden — unless the account has a
    temporary password, in which case the change-password form is shown and
-   cannot be dismissed.
+   cannot be dismissed. If no one is logged in, the login form is shown.
 3. Wraps `window.fetch`: a `401` from any of *your* API calls re-shows the login
    form; a `403 password_change_required` shows the change-password form.
 4. Fires `hj:ready` on `window` once, with the user (or `null`).
 
-On a successful login or password change the page reloads, so the server can
-send the protected content it withheld earlier.
+On a **public page** (`addPath(..., public=True)`) steps 2 and 3 never show the
+login form; a `401` there is left to your page. `hjAuth.showLogin()` still opens
+it, for a "Log in" button.
+
+On a successful login or password change the page reloads, so its data loads
+with the new session.
 
 ### Knowing who is logged in
 
@@ -228,7 +232,7 @@ const res = await fetch('/api/my-entries');
 if (res.ok) {
     const data = await res.json();
 }
-// a 401 here is already handled by auth.js (overlay re-appears)
+// a 401 here is already handled by auth.js (overlay re-appears; not on public pages)
 ```
 
 For `POST`, send JSON so the server parses `request.body` for you:

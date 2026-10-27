@@ -22,7 +22,7 @@ def handle_file_request(self, url_path, file_path, public=False, roles=None):
                 include_root = self.static_dir or os.path.dirname(absolute_path)
                 content = process_includes(content, absolute_path, include_root)
                 inject_urls = getattr(self, 'get_inject_js_urls', lambda: [])()
-                content = inject_js_scripts(content, inject_urls)
+                content = inject_js_scripts(content, inject_urls, public=public)
 
             request.send_response(200)
             request.send_header("Content-Type", content_type)
@@ -37,6 +37,8 @@ def handle_file_request(self, url_path, file_path, public=False, roles=None):
 
     automatic_handler._hj_public = bool(public)
     automatic_handler._hj_roles = list(roles) if roles else None
+    # An HTML page may be shown behind the login form (see WebHandler._authorize).
+    automatic_handler._hj_page = mimetypes.guess_type(absolute_path)[0] == 'text/html'
 
     if 'GET' not in self.routes:
         self.routes['GET'] = {}

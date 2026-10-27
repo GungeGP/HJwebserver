@@ -38,18 +38,19 @@ keeps its full precision unless you actually change it.
 ## Showing the table behind the login
 
 When the data route answers "not logged in", TableViewer keeps its placeholder
-rows instead of showing an error. The login form then sits on top of a ghost
-table. To get that, the *page* has to be public; the data stays protected:
+rows instead of showing an error. On a protected page that happens by itself:
+logged out, the page is shown with the login form on top of a ghost table.
 
 ```python
-app.addPath('/', 'public/index.html', public=True)    # the page: an empty frame
-app.addTableViewer('/api/daily', table="Employees")   # the data: still requires login
+app.addPath('/', 'public/index.html')                 # the page: shown behind the login
+app.addTableViewer('/api/daily', table="Employees")   # the data: requires login
 ```
 
-Only do this for pages whose HTML contains nothing private. Anonymous visitors
-receive the page itself, just never its rows.
+Anyone can read the page's HTML this way, just never its rows (see
+[auth.md](auth.md#what-a-logged-out-visitor-sees)). On a `public=True` page the
+login form never appears, so the placeholder rows simply stay.
 
-Because the page is public, your own CSS applies on the login screen too, for
+Because the page is shown, your own CSS applies on the login screen too, for
 example a see-through overlay instead of the default dark one:
 
 ```html
