@@ -31,7 +31,6 @@ from WebServer.database.core import (
     fetch_all,
     describe,
     create_tables,
-    save_work_time,
 )
 
 from WebServer.database.auth import (

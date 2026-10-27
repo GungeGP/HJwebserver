@@ -72,6 +72,20 @@ class AuthMixin:
         from WebServer.auth import resolve_user
         return resolve_user(request)
 
+    def _by(self, *details):
+        """Audit detail for a user change made from code, ending with who made
+        it: "by terminal (d1misgu)" (python -m WebServer) or "by python (d1misgu)"
+        (anything else calling these methods, e.g. main.py), with the operating
+        system account that ran it. No one is logged in to the site there, so
+        this is the best the log can say."""
+        import getpass
+        actor = getattr(self, '_audit_actor', None) or "python"
+        try:
+            actor += f" ({getpass.getuser()})"
+        except Exception:
+            pass   # no account name available (e.g. some service accounts)
+        return ", ".join([d for d in details if d] + [f"by {actor}"])
+
     def createUser(self, username, password, role="user", mustChangePassword=False):
         """Create a user with a hashed password. Returns False if the username already exists.
 
@@ -88,7 +102,7 @@ class AuthMixin:
         if get_user_by_username(username) is not None:
             return False
         create_user(username, hash_password(str(password)), role=str(role or "user"), must_change_password=mustChangePassword)
-        audit("user_created", username, f"role={role}")
+        audit("user_created", username, self._by(f"role={role}"))
         return True
 
     def setPassword(self, username, password, mustChangePassword=False):
@@ -104,7 +118,7 @@ class AuthMixin:
             return False
         update_user_password(username, hash_password(str(password)), must_change_password=mustChangePassword)
         revoke_sessions(username)
-        audit("password_changed", username, "by admin" + (", temporary" if mustChangePassword else ""))
+        audit("password_changed", username, self._by("temporary" if mustChangePassword else None))
         return True
 
     def setRole(self, username, role):
@@ -112,10 +126,11 @@ class AuthMixin:
         from WebServer.auth import audit, normalize_username
         from WebServer.database import get_user_by_username, set_user_role
         username = normalize_username(username)
-        if get_user_by_username(username) is None:
+        record = get_user_by_username(username)
+        if record is None:
             return False
         set_user_role(username, str(role))
-        audit("role_changed", username, f"role={role}")
+        audit("role_changed", username, self._by(f"{record.Role or 'user'} -> {role}"))
         return True
 
     def disableUser(self, username):
@@ -127,7 +142,7 @@ class AuthMixin:
             return False
         set_user_disabled(username, True)
         revoke_sessions(username)
-        audit("user_disabled", username)
+        audit("user_disabled", username, self._by())
         return True
 
     def enableUser(self, username):
@@ -138,7 +153,7 @@ class AuthMixin:
         if get_user_by_username(username) is None:
             return False
         set_user_disabled(username, False)
-        audit("user_enabled", username)
+        audit("user_enabled", username, self._by())
         return True
 
     def deleteUser(self, username):
@@ -146,11 +161,12 @@ class AuthMixin:
         from WebServer.auth import audit, normalize_username, revoke_sessions
         from WebServer.database import delete_user, get_user_by_username
         username = normalize_username(username)
-        if get_user_by_username(username) is None:
+        record = get_user_by_username(username)
+        if record is None:
             return False
         revoke_sessions(username)
         delete_user(username)
-        audit("user_deleted", username)
+        audit("user_deleted", username, self._by(f"role={record.Role or 'user'}"))
         return True
 
     def getUser(self, username):
@@ -175,13 +191,13 @@ class AuthMixin:
         from WebServer.auth import audit, normalize_username, revoke_sessions
         username = normalize_username(username)
         revoke_sessions(username)
-        audit("sessions_revoked", username)
+        audit("sessions_revoked", username, self._by())
 
     def unlock(self, username=None, ip=None):
         """Lift a login lockout early. unlock("alice") or unlock(ip="10.0.0.5"); no arguments = all."""
         from WebServer.auth import audit, unlock
         removed = unlock(username, ip)
-        audit("lockout_cleared", username, f"ip={ip}" if ip else ("all" if username is None else None))
+        audit("lockout_cleared", username, self._by(f"ip={ip}" if ip else ("all" if username is None else None)))
         return removed
 
     def getLockouts(self):
@@ -212,7 +228,7 @@ class AuthMixin:
         if not self.auth:
             raise RuntimeError("Authentication is not enabled. Use settings(auth=True) first.")
         token, _ = create_token_for_user(username)
-        audit("token_issued", username, "createAuth")
+        audit("token_issued", username, self._by("createAuth"))
         return token
 
     def _login_shell_html(self):

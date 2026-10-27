@@ -283,13 +283,34 @@ A handler that sets one of these headers itself wins over the default.
 With `auditLog=True` (the default) these events are written to the `AuditLog`
 table and printed to the console:
 
-| Event | When |
-|-------|------|
-| `login_ok`, `login_failed`, `login_locked` | `/api/login` |
-| `logout` | `/api/logout` |
-| `user_created`, `user_deleted`, `password_changed`, `password_rehashed` | user management |
-| `sessions_revoked` | `app.revokeSessions` |
-| anything you like | `app.audit(request, event, detail)` |
+| Event | When | Detail |
+|-------|------|--------|
+| `user_created` | `app.createUser` / `createuser` | `role=admin, by terminal (d1misgu)` |
+| `role_changed` | `app.setRole` / `setrole` | old and new role: `user -> admin, by python (d1misgu)` |
+| `user_deleted` | `app.deleteUser` / `deleteuser` | the role the user had: `role=user, by terminal (d1misgu)` |
+| `user_disabled`, `user_enabled` | `app.disableUser` / `app.enableUser` | `by terminal (d1misgu)` |
+| `access_denied` | a logged-in user calls a route their role doesn't allow (403) | `PUT /api/x needs admin, has user` (no query string) |
+| `password_changed` | by the user themselves, or set with `app.setPassword` / `setpassword` | `by user`, or `temporary, by terminal (d1misgu)` |
+| `password_change_failed` | wrong current password when changing it | |
+| `password_rehashed` | an old plain-text password was upgraded at login | |
+| `login_ok`, `login_failed`, `login_locked`, `login_disabled` | `/api/login` | |
+| `logout`, `logout_all` | `/api/logout`, `/api/logout-all` | |
+| `session_idle_expired` | a session ended after being idle too long | |
+| `sessions_revoked` | `app.revokeSessions` | |
+| `lockout_cleared` | `app.unlock` | |
+| `token_issued` | `app.createAuth` | |
+| anything you like | `app.audit(request, event, detail)` | |
+
+For user changes, `Username` is the user who was changed, and `Detail` ends
+with who made the change: `by terminal` for `python -m WebServer ...`,
+`by python` for code calling the `app.` methods (like `main.py`), followed by
+the operating system account that ran it, e.g. `by terminal (d1misgu)`. No one
+is logged in to the site there, so the account comes from the machine: it says
+which login was used, which is only as trustworthy as access to that machine.
+
+Changes to data made through a table viewer are not in the audit log; they
+are in [`tableviewLedger`](tableviewer.md#tableviewledger-what-exactly-changed),
+with the old and new values.
 
 Read it back with `app.getAuditLog(limit=100, username=None)`. Each row has
 `At` (epoch seconds), `Username`, `Event`, `Detail`, `Ip`. The IP is the direct

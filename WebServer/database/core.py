@@ -182,15 +182,6 @@ _SCHEMA = {
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS WorkTimeEntries (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Username TEXT NOT NULL,
-            WorkDate TEXT NOT NULL,
-            StartTime TEXT NOT NULL,
-            EndTime TEXT NOT NULL
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS Sessions (
             Jti TEXT PRIMARY KEY,
             Username TEXT NOT NULL,
@@ -219,7 +210,7 @@ _SCHEMA = {
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS Ledger (
+        CREATE TABLE IF NOT EXISTS tableviewLedger (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             At TEXT NOT NULL,
             Username TEXT,
@@ -242,16 +233,6 @@ _SCHEMA = {
             Role NVARCHAR(32) NOT NULL DEFAULT 'user',
             Disabled BIT NOT NULL DEFAULT 0,
             MustChangePassword BIT NOT NULL DEFAULT 0
-        )
-        """,
-        """
-        IF OBJECT_ID('WorkTimeEntries', 'U') IS NULL
-        CREATE TABLE WorkTimeEntries (
-            Id INT IDENTITY(1,1) PRIMARY KEY,
-            Username NVARCHAR(255) NOT NULL,
-            WorkDate DATE NOT NULL,
-            StartTime TIME NOT NULL,
-            EndTime TIME NOT NULL
         )
         """,
         """
@@ -286,8 +267,8 @@ _SCHEMA = {
         )
         """,
         """
-        IF OBJECT_ID('Ledger', 'U') IS NULL
-        CREATE TABLE Ledger (
+        IF OBJECT_ID('tableviewLedger', 'U') IS NULL
+        CREATE TABLE tableviewLedger (
             Id INT IDENTITY(1,1) PRIMARY KEY,
             At DATETIME2(0) NOT NULL,
             Username NVARCHAR(255) NULL,
@@ -309,15 +290,6 @@ _SCHEMA = {
             Role VARCHAR(32) NOT NULL DEFAULT 'user',
             Disabled TINYINT NOT NULL DEFAULT 0,
             MustChangePassword TINYINT NOT NULL DEFAULT 0
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS WorkTimeEntries (
-            Id INT AUTO_INCREMENT PRIMARY KEY,
-            Username VARCHAR(255) NOT NULL,
-            WorkDate DATE NOT NULL,
-            StartTime TIME NOT NULL,
-            EndTime TIME NOT NULL
         )
         """,
         """
@@ -349,7 +321,7 @@ _SCHEMA = {
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS Ledger (
+        CREATE TABLE IF NOT EXISTS tableviewLedger (
             Id INT AUTO_INCREMENT PRIMARY KEY,
             At DATETIME NOT NULL,
             Username VARCHAR(255) NULL,
@@ -408,7 +380,7 @@ def _column_exists(table, column):
 
 
 def create_tables():
-    """Create the framework tables (Users, Sessions, AuditLog, Ledger, WorkTimeEntries) if missing,
+    """Create the framework tables (Users, Sessions, LoginAttempts, AuditLog, tableviewLedger) if missing,
     and add any columns introduced by newer versions to existing tables."""
     for statement in _SCHEMA[_config["type"]]:
         execute(statement)
@@ -416,15 +388,3 @@ def create_tables():
     for table, column, ddl in _MIGRATIONS:
         if not _column_exists(table, column):
             execute(f"ALTER TABLE {table} {keyword} {column} {ddl[_config['type']]}")
-
-
-# ---------------------------------------------------------------------------
-# WorkTimeEntries - the sample/demo table this framework ships with
-# ---------------------------------------------------------------------------
-
-def save_work_time(username, work_date, start_time, end_time):
-    sql = """
-    INSERT INTO WorkTimeEntries (Username, WorkDate, StartTime, EndTime)
-    VALUES (?, ?, ?, ?)
-    """
-    execute(sql, (username, work_date, start_time, end_time))

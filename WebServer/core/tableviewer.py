@@ -16,7 +16,7 @@ class TableViewerMixin:
     def addTableViewer(self, url_path, table=None, roles=None, public=False, limit=40,
                        readOnly=False, edit=None, columns=None, editable=None, lookups=None,
                        related=None, computed=None, filters=None, types=None, validate=None,
-                       primaryKey=None, query=None, delete=None, sort=None):
+                       primaryKey=None, query=None, delete=None):
         """Show a database table (or view, or query) in a searchable, sortable,
         pageable, editable table. In your HTML you only need:
 
@@ -47,8 +47,6 @@ class TableViewerMixin:
                       column type (needed on sqlite, where dates are plain text).
                       One of text, number, bool, date, time, datetime.
           query       a SELECT to show instead of a table. Always read-only.
-          sort        starting order until a header is clicked: "Column" or
-                      ("Column", "desc"). Default: the primary key, ascending.
 
         Who may do what:
           roles/public  who may view - same as route(). Default: logged in.
@@ -58,7 +56,7 @@ class TableViewerMixin:
           delete        roles allowed to delete rows, e.g. ["admin"], or True for
                         anyone logged in. Default None: no deleting. Each row
                         gets a trash button that asks for a reason, which is
-                        recorded in the audit log with the row's key.
+                        recorded in tableviewLedger with the deleted row.
           readOnly      True disables editing and deleting entirely.
           editable      which shown columns can be edited. Default: every
                         shown column that isn't a key, join column, or computed.
@@ -76,7 +74,7 @@ class TableViewerMixin:
 
         viewer = TableViewer(table=table, columns=columns, editable=editable, lookups=lookups,
                              related=related, computed=computed, filters=filters, types=types,
-                             validate=validate, primaryKey=primaryKey, query=query, sort=sort)
+                             validate=validate, primaryKey=primaryKey, query=query)
         # No auth means no identity to check a role against, so no editing at
         # all rather than silently letting everyone edit.
         editing_enabled = bool(self.auth) and not readOnly and not query
@@ -129,11 +127,10 @@ class TableViewerMixin:
             def table_viewer_delete_route(request):
                 body = request.body if isinstance(request.body, dict) else {}
                 try:
-                    detail = viewer.delete(body, (getattr(request, 'user', None) or {}).get('username'))
+                    viewer.delete(body, (getattr(request, 'user', None) or {}).get('username'))
                 except ValueError as e:
                     send_json(request, 400, {"error": str(e)})
                     return
-                self.audit(request, "table_row_deleted", detail)
                 send_json(request, 200, {"ok": True, "action": "deleted"})
 
         if editing_enabled:
@@ -142,11 +139,10 @@ class TableViewerMixin:
             def table_viewer_update_route(request):
                 body = request.body if isinstance(request.body, dict) else {}
                 try:
-                    action, detail = viewer.save(body, (getattr(request, 'user', None) or {}).get('username'))
+                    action = viewer.save(body, (getattr(request, 'user', None) or {}).get('username'))
                 except ValueError as e:
                     send_json(request, 400, {"error": str(e)})
                     return
-                self.audit(request, f"table_row_{action}", detail)
                 send_json(request, 200, {"ok": True, "action": action})
 
             # Only editors need lookup options, and a lookup table can hold
