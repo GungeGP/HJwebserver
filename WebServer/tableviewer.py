@@ -12,20 +12,23 @@ Helpers for main.py live here too: dateFilter(), selectFilter(), duration().
 """
 
 import datetime as _dt
+import json
 import re
 import time
 from decimal import Decimal
 
 from WebServer.database import (
-    count_rows, describe_query, distinct_from, distinct_values, get_database_type,
-    get_foreign_keys, get_primary_key_columns, get_row, get_table_columns,
-    get_table_names, insert_row, lookup_options, quote_name, select_rows, text_expr, update_row,
+    count_rows, delete_row_sql, describe_query, distinct_from, distinct_values, execute_all,
+    get_database_type, get_foreign_keys, get_primary_key_columns, get_row, get_table_columns,
+    get_table_names, insert_row_sql, ledger_sql, lookup_options, quote_name, select_rows, text_expr,
+    update_row_sql,
 )
 
 SELECT_MAX = 20       # lookups up to this many rows edit as a plain dropdown
 LOCAL_MAX = 200       # ...up to this many as a searchable field with all options sent along
 OPTIONS_LIMIT = 20    # bigger lookups: matches returned per keystroke from /options
 FILTER_OPTIONS_MAX = 500
+REASON_MAX = 500      # longest delete reason; it goes into AuditLog.Detail (1024 chars)
 SPEC_TTL = 60         # seconds a resolved spec is trusted before the schema is read again
 
 KINDS = ("text", "number", "bool", "date", "time", "datetime")
@@ -121,6 +124,13 @@ def to_json(value):
     return value
 
 
+def _ledger_json(values):
+    """{column: value} as JSON text for the Ledger, e.g. {"Navn": "Mette Holm"}."""
+    if values is None:
+        return None
+    return json.dumps({k: to_json(v) for k, v in values.items()}, ensure_ascii=False, default=str)
+
+
 def parse_value(value, kind):
     """A value from the browser, converted for the database. sqlite stores
     dates as text, so it gets strings; mssql/mysql get real date objects."""
@@ -167,7 +177,7 @@ class TableViewer:
 
     def __init__(self, table=None, columns=None, editable=None, lookups=None, related=None,
                  computed=None, filters=None, types=None, validate=None, primaryKey=None,
-                 query=None):
+                 query=None, sort=None):
         if not table and not query:
             raise ValueError("addTableViewer needs either table= or query=")
         if query and (related or lookups):
@@ -175,10 +185,14 @@ class TableViewer:
         for kind in (types or {}).values():
             if kind not in KINDS:
                 raise ValueError(f"Unknown type '{kind}' in types=; use one of {', '.join(KINDS)}")
+        if isinstance(sort, str):
+            sort = (sort, "asc")
+        if sort is not None and (len(sort) != 2 or str(sort[1]).lower() not in ("asc", "desc")):
+            raise ValueError('sort= must be "Column" or ("Column", "asc" | "desc")')
         self.config = {
             "table": table, "columns": columns, "editable": editable, "lookups": lookups or {},
             "related": related, "computed": computed or {}, "filters": filters or {},
-            "types": types or {}, "primaryKey": primaryKey, "query": query,
+            "types": types or {}, "primaryKey": primaryKey, "query": query, "sort": sort,
         }
         self.validate = validate
         self._spec = None
@@ -488,7 +502,12 @@ class TableViewer:
                 where.append("(" + " OR ".join(like) + ")")
                 where_params.extend([f"{search}%"] * len(like))
 
-        sort_col = next((c for c in shown if sort and c["key"] == sort), None)
+        if not sort and self.config["sort"]:
+            # No column clicked yet: the viewer's own sort= (label or column name).
+            wanted, sort_dir = self.config["sort"]
+            sort_col = next((c for c in shown if str(wanted).lower() in (c["key"].lower(), c["column"].lower())), None)
+        else:
+            sort_col = next((c for c in shown if sort and c["key"] == sort), None)
         direction = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
         base_key = spec["base"]["key"]
         if sort_col:
@@ -617,7 +636,7 @@ class TableViewer:
 
     # --- PUT: save one row --------------------------------------------------
 
-    def save(self, body):
+    def save(self, body, username=None):
         """Apply one row's edits. Returns (action, detail) on success, raises
         ValueError with a message for the user otherwise.
 
@@ -625,6 +644,9 @@ class TableViewer:
         related row yet (a "-" row), the related values are inserted instead,
         with the join column taken from the base row and any related-table
         filter (like the selected day) filled in from the current filters.
+
+        Every change is written to the Ledger (old and new values, by
+        `username`) in the same transaction as the change itself.
         """
         spec = self.spec()
         base, related = spec["base"], spec["related"]
@@ -688,12 +710,18 @@ class TableViewer:
                 raise ValueError(str(message))
 
         try:
+            statements = []
             if changes["base"]:
-                update_row(base["table"], base_key, changes["base"])
+                statements.append(update_row_sql(base["table"], base_key, changes["base"]))
+                statements += self._ledger_edit(username, base["table"], base_key, base_row, changes["base"])
             if inserting:
-                insert_row(related["table"], insert_values)
+                statements.append(insert_row_sql(related["table"], insert_values))
+                statements.append(ledger_sql(username, "created", related["table"],
+                                             new_values=_ledger_json(insert_values)))
             elif changes["related"]:
-                update_row(related["table"], rel_key, changes["related"])
+                statements.append(update_row_sql(related["table"], rel_key, changes["related"]))
+                statements += self._ledger_edit(username, related["table"], rel_key, rel_row, changes["related"])
+            execute_all(statements)
         except ValueError:
             raise
         except Exception as e:
@@ -703,6 +731,54 @@ class TableViewer:
         table = related["table"] if inserting else base["table"]
         action = "created" if inserting else "edited"
         return action, f"table={table} key={base_key if not inserting else insert_values}"
+
+    # --- POST /delete: remove one row ---------------------------------------
+
+    def delete(self, body, username=None):
+        """Delete one base-table row. A reason is required; the returned
+        detail (table, key and reason) is what goes into the audit log, and
+        the whole row as it was goes into the Ledger with the reason, in the
+        same transaction as the delete. Raises ValueError with a message for
+        the user otherwise."""
+        spec = self.spec()
+        base = spec["base"]
+        if spec["query"] or not base["key"]:
+            raise ValueError("Rows here can't be deleted")
+        keys = body.get("keys") if isinstance(body.get("keys"), dict) else {}
+        key = self._key_values(base, keys.get("base"))
+        if not key:
+            raise ValueError("Missing the row's key; reload the page and try again")
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise ValueError("A reason is required")
+        if len(reason) > REASON_MAX:
+            raise ValueError(f"The reason can be at most {REASON_MAX} characters")
+        old_row = get_row(base["table"], key)
+        if old_row is None:
+            raise ValueError("That row no longer exists; reload the page")
+
+        try:
+            execute_all([
+                delete_row_sql(base["table"], key),
+                ledger_sql(username, "deleted", base["table"], _ledger_json(key),
+                           old_values=_ledger_json(old_row), reason=reason),
+            ])
+        except Exception as e:
+            print(f"[ tableviewer ] delete failed: {e!r}")
+            raise ValueError("The database rejected the delete") from None
+        return f"table={base['table']} key={key} reason={reason!r}"
+
+    @staticmethod
+    def _ledger_edit(username, table, key, old_row, changes):
+        """The Ledger entry for an edit: old and new value of every column
+        whose value really changed. Empty list when nothing did."""
+        old_row = old_row or {}
+        changed = [c for c in changes if to_json(old_row.get(c)) != to_json(changes[c])]
+        if not changed:
+            return []
+        return [ledger_sql(username, "edited", table, _ledger_json(key),
+                           old_values=_ledger_json({c: old_row.get(c) for c in changed}),
+                           new_values=_ledger_json({c: changes[c] for c in changed}))]
 
     @staticmethod
     def _key_values(source, given):

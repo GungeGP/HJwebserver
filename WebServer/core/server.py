@@ -106,6 +106,8 @@ class ServerMixin:
         self._register_asset_route('/js/TableViewer.js', 'js/TableViewer.js', 'application/javascript')
         self._register_asset_route('/css/TableViewer.css', 'css/TableViewer.css', 'text/css')
         self._register_asset_route('/css/auth.css', 'css/auth.css', 'text/css')
+        self._register_asset_route('/js/Dialog.js', 'js/Dialog.js', 'application/javascript')
+        self._register_asset_route('/css/Dialog.css', 'css/Dialog.css', 'text/css')
 
     def route(self, method, path, public=False, roles=None):
         """Register a handler. With auth enabled the route requires login unless public=True.

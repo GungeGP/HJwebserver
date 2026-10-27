@@ -116,7 +116,7 @@ class AssetsMixin:
 
     def _register_asset_alias_routes(self):
         get_routes = self.routes.setdefault('GET', {})
-        for url_path in ('/js/auth.js', '/js/webserver.js', '/js/TableViewer.js',
-                          '/css/TableViewer.css', '/css/auth.css'):
+        for url_path in ('/js/auth.js', '/js/webserver.js', '/js/TableViewer.js', '/js/Dialog.js',
+                          '/css/TableViewer.css', '/css/auth.css', '/css/Dialog.css'):
             if url_path in get_routes:
                 get_routes[f'/public{url_path}'] = get_routes[url_path]

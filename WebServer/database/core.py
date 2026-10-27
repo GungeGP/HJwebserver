@@ -121,6 +121,22 @@ def execute(sql, params=()):
         cursor.close()
 
 
+def execute_all(statements):
+    """Run several (sql, params) statements in one transaction: either all of
+    them are committed or, if any fails, none are."""
+    with _connection() as conn:
+        cursor = conn.cursor()
+        try:
+            for sql, params in statements:
+                cursor.execute(_prepare(sql), tuple(params))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+
 def fetch_one(sql, params=()):
     with _connection() as conn:
         cursor = conn.cursor()
@@ -202,6 +218,19 @@ _SCHEMA = {
             Ip TEXT
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS Ledger (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            At TEXT NOT NULL,
+            Username TEXT,
+            ChangeType TEXT NOT NULL,
+            TableName TEXT NOT NULL,
+            RowKey TEXT,
+            OldValues TEXT,
+            NewValues TEXT,
+            Reason TEXT
+        )
+        """,
     ],
     "mssql": [
         """
@@ -256,6 +285,20 @@ _SCHEMA = {
             Ip NVARCHAR(64) NULL
         )
         """,
+        """
+        IF OBJECT_ID('Ledger', 'U') IS NULL
+        CREATE TABLE Ledger (
+            Id INT IDENTITY(1,1) PRIMARY KEY,
+            At DATETIME2(0) NOT NULL,
+            Username NVARCHAR(255) NULL,
+            ChangeType NVARCHAR(16) NOT NULL,
+            TableName NVARCHAR(128) NOT NULL,
+            RowKey NVARCHAR(255) NULL,
+            OldValues NVARCHAR(MAX) NULL,
+            NewValues NVARCHAR(MAX) NULL,
+            Reason NVARCHAR(1024) NULL
+        )
+        """,
     ],
     "mysql": [
         """
@@ -305,6 +348,19 @@ _SCHEMA = {
             Ip VARCHAR(64) NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS Ledger (
+            Id INT AUTO_INCREMENT PRIMARY KEY,
+            At DATETIME NOT NULL,
+            Username VARCHAR(255) NULL,
+            ChangeType VARCHAR(16) NOT NULL,
+            TableName VARCHAR(128) NOT NULL,
+            RowKey VARCHAR(255) NULL,
+            OldValues LONGTEXT NULL,
+            NewValues LONGTEXT NULL,
+            Reason VARCHAR(1024) NULL
+        )
+        """,
     ],
 }
 
@@ -352,7 +408,7 @@ def _column_exists(table, column):
 
 
 def create_tables():
-    """Create the framework tables (Users, Sessions, AuditLog, WorkTimeEntries) if missing,
+    """Create the framework tables (Users, Sessions, AuditLog, Ledger, WorkTimeEntries) if missing,
     and add any columns introduced by newer versions to existing tables."""
     for statement in _SCHEMA[_config["type"]]:
         execute(statement)
