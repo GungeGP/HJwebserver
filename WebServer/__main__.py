@@ -88,6 +88,7 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     app = _load_app(args.app)
+    app._audit_actor = "terminal"   # user changes from here are logged "by terminal"
 
     def done(ok, yes, no):
         print(yes if ok else no)

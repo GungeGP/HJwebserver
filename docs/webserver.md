@@ -34,7 +34,7 @@ Configure the database. See [Database](database.md) for backend details.
 | `user` | `None` | Username. Required for mysql. For mssql, leave empty to use Windows authentication. |
 | `password` | `None` | Password for `user`. |
 | `port` | `None` | Port override. Defaults: mssql 1433, mysql 3306. |
-| `createTables` | `True` | Create the framework tables (`Users`, `Sessions`, `AuditLog`, `WorkTimeEntries`) if they don't exist. Pass `False` if the schema is managed elsewhere. |
+| `createTables` | `True` | Create the framework tables (`Users`, `Sessions`, `LoginAttempts`, `AuditLog`, `tableviewLedger`) if they don't exist. Pass `False` if the schema is managed elsewhere. |
 
 ```python
 app.setDatabase(type="sqlite", dbName="workTime.db")
@@ -69,7 +69,7 @@ app.settings(auth=True, tokenLifetimeHours=8, maxLoginAttempts=3)
 | `maxLoginAttempts` | `5` | Failed logins (per username *and* per IP) before a lockout. |
 | `lockoutMinutes` | `15` | How long a lockout lasts. |
 | `minPasswordLength` | `5` | Enforced by `createUser` / `setPassword`. |
-| `auditLog` | `True` | Write logins, logouts, lockouts and user changes to the `AuditLog` table. |
+| `auditLog` | `True` | Write logins, logouts, lockouts, user and role changes and refused access to the `AuditLog` table. |
 | `trustProxy` | `False` | Take the client IP from `X-Forwarded-For`. Only set behind a reverse proxy you control. |
 | `csp` | a default policy | `Content-Security-Policy` header value. `None` sends none. See [Authentication → Security headers](auth.md#security-headers). |
 | `securityHeaders` | `True` | Send `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, CSP (and HSTS on HTTPS). |

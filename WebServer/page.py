@@ -58,14 +58,17 @@ def _expand(content, current_dir, root, depth, stack):
     return INCLUDE_RE.sub(replace, content)
 
 
-def inject_js_scripts(content, urls):
+def inject_js_scripts(content, urls, public=False):
     """Insert <script src="..."> tags for each url, right before </body>
     (or appended at the end if there's no </body> tag).
 
     Used to auto-load the framework's own js assets - see
     core/assets.py's get_inject_js_urls() for which urls these are.
+    public=True marks the tags data-hj-page="public", which tells auth.js
+    never to show the login form on this page.
     """
-    injections = [f'<script src="{url}"></script>'.encode('utf-8') for url in urls if url]
+    marker = ' data-hj-page="public"' if public else ''
+    injections = [f'<script src="{url}"{marker}></script>'.encode('utf-8') for url in urls if url]
     if not injections:
         return content
 

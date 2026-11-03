@@ -38,18 +38,19 @@ keeps its full precision unless you actually change it.
 ## Showing the table behind the login
 
 When the data route answers "not logged in", TableViewer keeps its placeholder
-rows instead of showing an error. The login form then sits on top of a ghost
-table. To get that, the *page* has to be public; the data stays protected:
+rows instead of showing an error. On a protected page that happens by itself:
+logged out, the page is shown with the login form on top of a ghost table.
 
 ```python
-app.addPath('/', 'public/index.html', public=True)    # the page: an empty frame
-app.addTableViewer('/api/daily', table="Employees")   # the data: still requires login
+app.addPath('/', 'public/index.html')                 # the page: shown behind the login
+app.addTableViewer('/api/daily', table="Employees")   # the data: requires login
 ```
 
-Only do this for pages whose HTML contains nothing private. Anonymous visitors
-receive the page itself, just never its rows.
+Anyone can read the page's HTML this way, just never its rows (see
+[auth.md](auth.md#what-a-logged-out-visitor-sees)). On a `public=True` page the
+login form never appears, so the placeholder rows simply stay.
 
-Because the page is public, your own CSS applies on the login screen too, for
+Because the page is shown, your own CSS applies on the login screen too, for
 example a see-through overlay instead of the default dark one:
 
 ```html
@@ -161,12 +162,62 @@ on. `duration(start, end)` is included and returns `"H:MM"`.
 | `roles=[...]`, `public=True` | Who may *view* (same as `route()`) |
 | `edit=["admin"]` | Only these roles may edit. Default: anyone logged in |
 | `editable=[...]` | Which shown columns can be edited (labels or column names). Default: every shown column except keys, join columns and computed ones |
-| `readOnly=True` | No editing at all |
+| `delete=["admin"]` | These roles get a red trash button per row (`delete=True`: anyone logged in). Default: no deleting |
+| `readOnly=True` | No editing or deleting at all |
 
 - Editing always requires login, even with `public=True`.
 - **Without `settings(auth=True)` nothing is editable.** There's no login to
   check a role against.
 - Only tables with a primary key can be edited, since the key is how a row is found.
+
+## Deleting rows
+
+```python
+app.addTableViewer('/api/forsorgshjem', table="Forsorgshjem", edit=["admin"], delete=["admin"])
+```
+
+Each row gets a red trash button next to Edit. It opens an
+[`hjDialog`](frontend.md#dialogjs--popups-hjdialog) asking for a reason; the
+row is only deleted once a reason is typed and confirmed.
+
+- The row disappears from the table, but the [tableviewLedger](#tableviewledger-what-exactly-changed)
+  keeps every value it had, with the reason, so it can be put back by hand.
+- The reason is required (the server refuses an empty one) and at most 500
+  characters.
+- Only the base table's row is deleted, never a related row. If the database
+  refuses (a foreign key still points at the row), the dialog says so and
+  nothing changes.
+- Like editing, deleting needs `settings(auth=True)` and a primary key, and
+  never works for `query=` viewers or with `readOnly=True`.
+
+## tableviewLedger: what exactly changed
+
+Every change made through a table viewer is written to the `tableviewLedger` table,
+in the same transaction as the change itself: if the ledger entry can't be
+written, the change isn't saved either. The table is created automatically
+with the framework's other tables.
+
+| Column | Contents |
+|---|---|
+| `Id`, `At` | Running number and date/time (server's local time) |
+| `Username` | Who made the change |
+| `ChangeType` | `edited`, `created` (a new related row) or `deleted` |
+| `TableName`, `RowKey` | Which row, e.g. `Forsorgshjem` and `{"ID": 5}` |
+| `OldValues` | Before: for an edit only the columns that changed, for a delete the whole row |
+| `NewValues` | After: the changed columns, or the inserted row |
+| `Reason` | The reason given for a delete |
+
+Values are JSON, written the way the table shows them: `{"Navn": "Mette Holm",
+"Indskr": "2025-07-25"}`. Edits that don't actually change a value leave no
+entry.
+
+To undo a mistake, find the entry and write the `OldValues` back, either in
+the table viewer or with SQL. A deleted row can be inserted again from its
+`OldValues` (with `SET IDENTITY_INSERT ... ON` on mssql to keep its old id).
+The ledger is read in the database itself (SSMS); it has no page.
+
+Only changes made through a table viewer are recorded. Changes made directly
+in the database (SSMS, scripts) are not.
 
 ## Checking a value before saving
 
@@ -215,9 +266,11 @@ don't need this; the column types come from the schema.
 | `GET <url>` | viewers | a page of rows |
 | `PUT <url>` | editors | save one row |
 | `GET <url>/options` | editors | lookup matches for large lookups |
+| `POST <url>/delete` | `delete=` roles | delete one row: `{"keys": {"base": {...}}, "reason": "..."}` |
 
-The PUT and options routes only exist when editing is possible. Saves are
-recorded in the audit log as `table_row_edited` / `table_row_created`.
+The PUT and options routes only exist when editing is possible, the delete
+route only with `delete=`. Saves and deletes are recorded in
+`tableviewLedger`, not in the audit log.
 
 Table and column names are checked against the database schema before they're
 used in any SQL, and the result is cached for 60 seconds. If you change the

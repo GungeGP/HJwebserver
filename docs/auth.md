@@ -40,13 +40,20 @@ app.addPath('/welcome', 'public/welcome.html', public=True)
 Static files in `public/` cannot be marked public individually; use `addPath(..., public=True)`
 for the specific ones you need.
 
-What an unauthenticated visitor gets:
+### What a logged-out visitor sees
 
 | Request | Response |
 |---------|----------|
-| Browser opens a protected page | A bare login page (the real HTML is **not** sent) |
+| Browser opens a protected page (`addPath` or an `.html` file in `public/`) | The page itself, with the login form on top. Everything it loads from the API still answers `401`, so it shows no data |
+| Browser opens a page limited to roles (`addPath(..., roles=["admin"])`) | A bare login page (the page's HTML is **not** sent) |
+| Browser opens a protected `@app.route` that returns HTML | A bare login page |
 | `fetch()` / API call to a protected route | `401` with `{"error": "Authentication required."}` |
-| Anything marked `public=True` | Served normally |
+| Anything marked `public=True` | Served normally, and the login form **never** appears on its own, not even when an API call there answers `401`. The page can still open it with `hjAuth.showLogin()`, e.g. from a "Log in" button |
+
+Showing a protected page behind the login means its HTML can be read by
+anyone (view source). Keep private information out of the HTML itself and
+load it from the API, which stays protected; for a page whose layout should
+stay hidden too, add `roles=`.
 
 Once logged in, a protected handler can rely on `request.user`:
 
@@ -165,13 +172,13 @@ While a password change is pending, every other protected route answers
 |---|---|
 | Title, message, logo | `settings(auth=True, loginTitle="...", loginMessage="...", loginLogo="/img/logo.png")` |
 | All of the styling | Put your own `public/css/auth.css` in the project. It replaces the framework's copy completely, so start from a copy of `WebServer/public/css/auth.css` |
-| A few rules, on a public page | Ordinary CSS in your page, e.g. `html #login-overlay { background-color: rgba(255,255,255,.35); }` |
+| A few rules, on one page | Ordinary CSS in your page, e.g. `html #login-overlay { background-color: rgba(255,255,255,.35); }` |
 
-On a protected page, a visitor who isn't logged in never receives your HTML.
-They get a bare login page from the framework, so only `auth.css` styles it,
-not your page's own CSS. Making the page public (`addPath(..., public=True)`)
-sends your page with the login form on top. That's how to show a
-[TableViewer ghost table behind the login](tableviewer.md#showing-the-table-behind-the-login).
+A protected page is sent with the login form on top, so your page's own CSS
+styles the login too. That's how a
+[TableViewer ghost table shows behind the login](tableviewer.md#showing-the-table-behind-the-login).
+Pages limited to `roles=` get the framework's bare login page instead, which
+only `auth.css` styles.
 
 ### Your own `auth.css`
 
@@ -283,13 +290,34 @@ A handler that sets one of these headers itself wins over the default.
 With `auditLog=True` (the default) these events are written to the `AuditLog`
 table and printed to the console:
 
-| Event | When |
-|-------|------|
-| `login_ok`, `login_failed`, `login_locked` | `/api/login` |
-| `logout` | `/api/logout` |
-| `user_created`, `user_deleted`, `password_changed`, `password_rehashed` | user management |
-| `sessions_revoked` | `app.revokeSessions` |
-| anything you like | `app.audit(request, event, detail)` |
+| Event | When | Detail |
+|-------|------|--------|
+| `user_created` | `app.createUser` / `createuser` | `role=admin, by terminal (d1misgu)` |
+| `role_changed` | `app.setRole` / `setrole` | old and new role: `user -> admin, by python (d1misgu)` |
+| `user_deleted` | `app.deleteUser` / `deleteuser` | the role the user had: `role=user, by terminal (d1misgu)` |
+| `user_disabled`, `user_enabled` | `app.disableUser` / `app.enableUser` | `by terminal (d1misgu)` |
+| `access_denied` | a logged-in user calls a route their role doesn't allow (403) | `PUT /api/x needs admin, has user` (no query string) |
+| `password_changed` | by the user themselves, or set with `app.setPassword` / `setpassword` | `by user`, or `temporary, by terminal (d1misgu)` |
+| `password_change_failed` | wrong current password when changing it | |
+| `password_rehashed` | an old plain-text password was upgraded at login | |
+| `login_ok`, `login_failed`, `login_locked`, `login_disabled` | `/api/login` | |
+| `logout`, `logout_all` | `/api/logout`, `/api/logout-all` | |
+| `session_idle_expired` | a session ended after being idle too long | |
+| `sessions_revoked` | `app.revokeSessions` | |
+| `lockout_cleared` | `app.unlock` | |
+| `token_issued` | `app.createAuth` | |
+| anything you like | `app.audit(request, event, detail)` | |
+
+For user changes, `Username` is the user who was changed, and `Detail` ends
+with who made the change: `by terminal` for `python -m WebServer ...`,
+`by python` for code calling the `app.` methods (like `main.py`), followed by
+the operating system account that ran it, e.g. `by terminal (d1misgu)`. No one
+is logged in to the site there, so the account comes from the machine: it says
+which login was used, which is only as trustworthy as access to that machine.
+
+Changes to data made through a table viewer are not in the audit log; they
+are in [`tableviewLedger`](tableviewer.md#tableviewledger-what-exactly-changed),
+with the old and new values.
 
 Read it back with `app.getAuditLog(limit=100, username=None)`. Each row has
 `At` (epoch seconds), `Username`, `Event`, `Detail`, `Ip`. The IP is the direct

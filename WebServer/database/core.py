@@ -121,6 +121,22 @@ def execute(sql, params=()):
         cursor.close()
 
 
+def execute_all(statements):
+    """Run several (sql, params) statements in one transaction: either all of
+    them are committed or, if any fails, none are."""
+    with _connection() as conn:
+        cursor = conn.cursor()
+        try:
+            for sql, params in statements:
+                cursor.execute(_prepare(sql), tuple(params))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+
+
 def fetch_one(sql, params=()):
     with _connection() as conn:
         cursor = conn.cursor()
@@ -166,15 +182,6 @@ _SCHEMA = {
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS WorkTimeEntries (
-            Id INTEGER PRIMARY KEY AUTOINCREMENT,
-            Username TEXT NOT NULL,
-            WorkDate TEXT NOT NULL,
-            StartTime TEXT NOT NULL,
-            EndTime TEXT NOT NULL
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS Sessions (
             Jti TEXT PRIMARY KEY,
             Username TEXT NOT NULL,
@@ -202,6 +209,19 @@ _SCHEMA = {
             Ip TEXT
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS tableviewLedger (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            At TEXT NOT NULL,
+            Username TEXT,
+            ChangeType TEXT NOT NULL,
+            TableName TEXT NOT NULL,
+            RowKey TEXT,
+            OldValues TEXT,
+            NewValues TEXT,
+            Reason TEXT
+        )
+        """,
     ],
     "mssql": [
         """
@@ -213,16 +233,6 @@ _SCHEMA = {
             Role NVARCHAR(32) NOT NULL DEFAULT 'user',
             Disabled BIT NOT NULL DEFAULT 0,
             MustChangePassword BIT NOT NULL DEFAULT 0
-        )
-        """,
-        """
-        IF OBJECT_ID('WorkTimeEntries', 'U') IS NULL
-        CREATE TABLE WorkTimeEntries (
-            Id INT IDENTITY(1,1) PRIMARY KEY,
-            Username NVARCHAR(255) NOT NULL,
-            WorkDate DATE NOT NULL,
-            StartTime TIME NOT NULL,
-            EndTime TIME NOT NULL
         )
         """,
         """
@@ -256,6 +266,20 @@ _SCHEMA = {
             Ip NVARCHAR(64) NULL
         )
         """,
+        """
+        IF OBJECT_ID('tableviewLedger', 'U') IS NULL
+        CREATE TABLE tableviewLedger (
+            Id INT IDENTITY(1,1) PRIMARY KEY,
+            At DATETIME2(0) NOT NULL,
+            Username NVARCHAR(255) NULL,
+            ChangeType NVARCHAR(16) NOT NULL,
+            TableName NVARCHAR(128) NOT NULL,
+            RowKey NVARCHAR(255) NULL,
+            OldValues NVARCHAR(MAX) NULL,
+            NewValues NVARCHAR(MAX) NULL,
+            Reason NVARCHAR(1024) NULL
+        )
+        """,
     ],
     "mysql": [
         """
@@ -266,15 +290,6 @@ _SCHEMA = {
             Role VARCHAR(32) NOT NULL DEFAULT 'user',
             Disabled TINYINT NOT NULL DEFAULT 0,
             MustChangePassword TINYINT NOT NULL DEFAULT 0
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS WorkTimeEntries (
-            Id INT AUTO_INCREMENT PRIMARY KEY,
-            Username VARCHAR(255) NOT NULL,
-            WorkDate DATE NOT NULL,
-            StartTime TIME NOT NULL,
-            EndTime TIME NOT NULL
         )
         """,
         """
@@ -303,6 +318,19 @@ _SCHEMA = {
             Event VARCHAR(64) NOT NULL,
             Detail VARCHAR(1024) NULL,
             Ip VARCHAR(64) NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS tableviewLedger (
+            Id INT AUTO_INCREMENT PRIMARY KEY,
+            At DATETIME NOT NULL,
+            Username VARCHAR(255) NULL,
+            ChangeType VARCHAR(16) NOT NULL,
+            TableName VARCHAR(128) NOT NULL,
+            RowKey VARCHAR(255) NULL,
+            OldValues LONGTEXT NULL,
+            NewValues LONGTEXT NULL,
+            Reason VARCHAR(1024) NULL
         )
         """,
     ],
@@ -352,7 +380,7 @@ def _column_exists(table, column):
 
 
 def create_tables():
-    """Create the framework tables (Users, Sessions, AuditLog, WorkTimeEntries) if missing,
+    """Create the framework tables (Users, Sessions, LoginAttempts, AuditLog, tableviewLedger) if missing,
     and add any columns introduced by newer versions to existing tables."""
     for statement in _SCHEMA[_config["type"]]:
         execute(statement)
@@ -360,15 +388,3 @@ def create_tables():
     for table, column, ddl in _MIGRATIONS:
         if not _column_exists(table, column):
             execute(f"ALTER TABLE {table} {keyword} {column} {ddl[_config['type']]}")
-
-
-# ---------------------------------------------------------------------------
-# WorkTimeEntries - the sample/demo table this framework ships with
-# ---------------------------------------------------------------------------
-
-def save_work_time(username, work_date, start_time, end_time):
-    sql = """
-    INSERT INTO WorkTimeEntries (Username, WorkDate, StartTime, EndTime)
-    VALUES (?, ?, ?, ?)
-    """
-    execute(sql, (username, work_date, start_time, end_time))

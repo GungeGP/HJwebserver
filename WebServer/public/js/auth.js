@@ -14,6 +14,9 @@
 
 (function () {
     let config = { title: 'Access Restricted', message: 'Please log in to continue.', logo: null, rememberMe: true, minPasswordLength: 8 };
+    // Public pages (addPath(..., public=True)) never show the login form on
+    // their own - only when the page asks for it with hjAuth.showLogin().
+    const publicPage = document.currentScript?.dataset.hjPage === 'public';
 
     window.currentUser = null;
 
@@ -33,7 +36,7 @@
         const url = typeof input === 'string' ? input : (input && input.url) || '';
         if (url.includes('/api/login') || url.includes('/api/change-password')) { return response; }
         if (response.status === 401) {
-            showOverlay('login');
+            if (!publicPage) { showOverlay('login'); }
         } else if (response.status === 403) {
             try {
                 const data = await response.clone().json();
@@ -60,7 +63,7 @@
             } else {
                 hideOverlay();
             }
-        } else {
+        } else if (!publicPage) {
             showOverlay('login');
         }
         window.dispatchEvent(new CustomEvent('hj:ready', { detail: { user: window.currentUser } }));

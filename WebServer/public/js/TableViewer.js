@@ -23,6 +23,12 @@ function _ensureTableViewerStyles() {
     return _tvStylesReady;
 }
 
+// Trash can for the delete button; stroke follows the button's (red) text colour.
+const _TV_TRASH_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" '
+    + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M5 6h14"/><path d="M9.5 6V4h5v2"/><path d="M17 6l-1 14H8L7 6"/>'
+    + '<path d="M10.5 10v6"/><path d="M13.5 10v6"/></svg>';
+
 // --- value formatting -------------------------------------------------------
 // The server sends dates and times as ISO strings ("2025-11-10T07:30:00").
 // Display is DD-MM-YYYY / HH:MM; the browser's pickers want YYYY-MM-DD / HH:MM.
@@ -97,6 +103,7 @@ class TableViewer {
         this.totalPages = 1;
         this.primaryKey = [];
         this.canEdit = false;
+        this.canDelete = false;
         this._searchTimer = null;
         this._paginated = Boolean(this.url);
         this._loadToken = 0;
@@ -201,6 +208,7 @@ class TableViewer {
             this.page = data.page ?? this.page;
             this.primaryKey = data.primaryKey || [];
             this.canEdit = Boolean(data.canEdit);
+            this.canDelete = Boolean(data.canDelete) && typeof globalThis.hjDialog === 'object';
             if (!data.columnsMeta && this.canEdit) {
                 // Older/hand-written endpoints: every non-key column edits as text.
                 this.columns.forEach(c => {
@@ -289,6 +297,7 @@ class TableViewer {
         this.total = this.rows.length;
         this.totalPages = 1;
         this.canEdit = false;
+        this.canDelete = false;
         this.errorEl.hidden = true;
         this.scrollEl.hidden = false;
         this._render();
@@ -404,6 +413,8 @@ class TableViewer {
             cell.textContent = text;
             cell.classList.remove('tableviewer-null');
         }
+        // One-word values (dates, CPR, numbers) would otherwise break at "-".
+        cell.classList.toggle('tableviewer-nowrap', text === null || !/\s/.test(text));
     }
 
     _renderTable() {
@@ -428,9 +439,10 @@ class TableViewer {
             }
             headRow.appendChild(th);
         });
-        // No Actions column at all for viewers who can't edit - a disabled
+        // No Actions column at all for viewers who can't edit or delete - a disabled
         // button there would just be dead weight for them, not a real affordance.
-        if (this.canEdit) {
+        const hasActions = this.canEdit || this.canDelete;
+        if (hasActions) {
             const actionsHead = document.createElement('th');
             actionsHead.className = 'tableviewer-actions-col';
             actionsHead.textContent = 'Actions';
@@ -440,7 +452,7 @@ class TableViewer {
         const body = this.tableEl.createTBody();
         if (!this.rows.length) {
             const td = body.insertRow().insertCell();
-            td.colSpan = this.columns.length + (this.canEdit ? 1 : 0);
+            td.colSpan = this.columns.length + (hasActions ? 1 : 0);
             td.className = 'tableviewer-empty';
             td.textContent = 'No rows found.';
             return;
@@ -454,16 +466,36 @@ class TableViewer {
                 this._fillCell(cell, row, name);
             });
 
-            if (this.canEdit) {
+            if (hasActions) {
                 const actionCell = tr.insertCell();
                 actionCell.className = 'tableviewer-actions-col';
-                const editBtn = document.createElement('button');
-                editBtn.type = 'button';
-                editBtn.className = 'tableviewer-edit-btn';
-                editBtn.textContent = 'Edit';
-                editBtn.addEventListener('click', () => this._beginRowEdit(tr, row));
-                actionCell.appendChild(editBtn);
+                if (this.canEdit) {
+                    const editBtn = document.createElement('button');
+                    editBtn.type = 'button';
+                    editBtn.className = 'tableviewer-edit-btn';
+                    editBtn.textContent = 'Edit';
+                    editBtn.addEventListener('click', () => this._beginRowEdit(tr, row));
+                    actionCell.appendChild(editBtn);
+                }
+                if (this.canDelete) {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.type = 'button';
+                    deleteBtn.className = 'tableviewer-edit-btn tableviewer-delete-btn';
+                    deleteBtn.title = 'Delete';
+                    deleteBtn.setAttribute('aria-label', 'Delete row');
+                    deleteBtn.innerHTML = _TV_TRASH_ICON;
+                    deleteBtn.addEventListener('click', () => this._deleteRow(row));
+                    actionCell.appendChild(deleteBtn);
+                }
             }
+        });
+
+        // Columns where every value fits on one line (CPR, dates, amounts)
+        // shrink to their content; columns of wrapping text take the rest.
+        Array.from(headRow.cells).forEach((th, i) => {
+            if (i >= this.columns.length) return;
+            const tight = Array.from(body.rows).every(r => r.cells[i].classList.contains('tableviewer-nowrap'));
+            th.classList.toggle('tableviewer-tight', tight);
         });
     }
 
@@ -474,6 +506,7 @@ class TableViewer {
         const cells = Array.from(tr.cells);
         const editors = {};
         const save = () => this._saveRowEdit(row, editors, saveBtn, cancelBtn);
+        tr.classList.add('tableviewer-editing');
 
         this.columns.forEach((key, i) => {
             const meta = this.columnsMeta[key] || {};
@@ -555,6 +588,11 @@ class TableViewer {
         input.className = 'tableviewer-edit-input';
         input.type = { date: 'date', time: 'time', datetime: 'datetime-local', number: 'number' }[meta.kind] || 'text';
         if (meta.kind === 'number') input.step = 'any';
+        // The calendar icon is hidden to keep the row narrow (TableViewer.css),
+        // so clicking the field opens the calendar instead.
+        if (meta.kind === 'date') {
+            input.addEventListener('click', () => { try { input.showPicker(); } catch (e) { /* unsupported */ } });
+        }
         const original = _tvInputValue(value, meta.kind);
         input.value = original;
         return {
@@ -682,6 +720,34 @@ class TableViewer {
             this.errorEl.hidden = false;
             this._renderTable(); // revert this row back to display mode
         }
+    }
+
+    /** Ask for a reason (hjDialog, js/Dialog.js), then delete the row on the server. */
+    async _deleteRow(row) {
+        const keys = (row.__meta && row.__meta.keys) || { base: Object.fromEntries(this.primaryKey.map(k => [k, row[k]])) };
+        const summary = this.columns.slice(0, 2).map(c => this._cellText(row, c)).filter(Boolean).join(' · ');
+        const reason = await hjDialog.open({
+            type: 'textarea',
+            title: 'Delete row',
+            message: `${summary ? `"${summary}"` : 'This row'} will be deleted permanently.`,
+            label: 'Reason',
+            placeholder: 'Why is this row being deleted?',
+            maxLength: 500,
+            confirmText: 'Delete',
+            danger: true,
+            onConfirm: async text => {
+                const res = await fetch(`${this.url.split('?')[0].replace(/\/$/, '')}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keys, reason: text }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            },
+        });
+        if (reason === null) return;   // cancelled
+        this.errorEl.hidden = true;
+        await this.load();
     }
 
     _renderPagination() {
