@@ -8,6 +8,7 @@ tags inserted just before `</body>`:
 ```html
 <script src="/js/webserver.js?v=…"></script>
 <script src="/js/Dialog.js?v=…"></script>
+<script src="/js/calender.js?v=…"></script>
 <script src="/js/auth.js?v=…"></script>   <!-- only when auth is on -->
 <script src="/js/TableViewer.js?v=…"></script>   <!-- only once addTableViewer() is used -->
 ```
@@ -135,6 +136,38 @@ several lines).
 Styling: the classes all start with `hj-dialog` (`.hj-dialog-box`,
 `.hj-dialog-confirm`, …); see `css/Dialog.css`, or override it with your own
 `public/css/Dialog.css`.
+
+## `calender.js` — pick a date range: `data-calendar`
+
+A month view that fills its container (100% width and height). The user clicks
+a start and an end date (in either order; a third click starts over) and
+presses **Send**, which POSTs them to the endpoint named in the attribute:
+
+```html
+<div data-calendar="/api/cal" style="height: 100vh"></div>
+```
+
+```python
+@app.route('POST', '/api/cal')
+def cal(request):
+    start, end = request.body["start"], request.body["end"]   # "YYYY-MM-DD"
+    send_json(request, 200, {"ok": True})
+```
+
+The endpoint's JSON answer comes back to the page in a `calendar:select` event:
+
+```js
+el.addEventListener('calendar:select', e => {
+    e.detail   // {start: "2026-11-03", end: "2026-11-12", response: {...}}
+});
+```
+
+A non-2xx answer is shown with `Notify(response.error, 'error')`.
+`data-calendar-confirm` and `data-calendar-clear` change the button texts;
+month and weekday names follow `<html lang>`. Weeks start on Monday. The
+element's height must come from somewhere (`100vh`, or `html, body { height: 100% }`
+around it) — it never shrinks below 360px. Styling: classes start with
+`calendar-`; see `css/calender.css`.
 
 ## `auth.js` — the login overlay
 

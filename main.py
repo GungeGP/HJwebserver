@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 
 from WebServer import WebServer
+from WebServer.helper import send_json
 from WebServer.tableviewer import selectFilter
 
 app = WebServer(port=8080)
@@ -10,7 +11,8 @@ app = WebServer(port=8080)
 app.setDatabase(type="mssql", server="localhost", dbName="Forsorg")  # Windows login; add user=/password= for a SQL Server login
 # app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
-app.addPath('/', 'public/index.html')  # logged out: the page shows behind the login form; its data still needs login
+app.addPath('/', 'public/index.html')
+app.addPath('/cal', 'public/cal.html')
 app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
 
 def valid_cpr(cpr):
@@ -41,6 +43,25 @@ app.addTableViewer('/api/forsorgshjem', table="Forsorgshjem",
              "Fritaget": selectFilter("Fritaget", allLabel="-- Alle --")},
     validate=validate_forsorgshjem,
     edit=["admin"], delete=["admin"])
+
+@app.route('POST', '/api/cal')
+def cal_selected(request):
+    """The two dates picked on /cal, sent as {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}."""
+    body = request.body if isinstance(request.body, dict) else {}
+    try:
+        start = datetime.strptime(str(body.get("start")), "%Y-%m-%d").date()
+        end = datetime.strptime(str(body.get("end")), "%Y-%m-%d").date()
+    except ValueError:
+        send_json(request, 400, {"error": "start og end skal have formatet YYYY-MM-DD"})
+        return
+    if end < start:
+        send_json(request, 400, {"error": "end skal være efter start"})
+        return
+    # Use the dates for whatever you need here
+    print(f"{request.user['username'] if request.user else '?'} picked {start} -> {end}")
+    send_json(request, 200, {"start": start.isoformat(), "end": end.isoformat(),
+                             "days": (end - start).days + 1})
+
 
 # Create an admin user
 # python -m WebServer createuser admin --role admin

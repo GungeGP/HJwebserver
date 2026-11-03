@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forsorgshjem</title>
+    <style>
+        html, body { height: 100%; margin: 0; }
+    </style>
+</head>
+<body>
+    <div id="calendar" data-calendar="/api/cal"></div>
+    <script>
+        document.getElementById('calendar').addEventListener('calendar:select', e => {
+            // e.detail = {start: "2026-11-03", end: "2026-11-12", response: <what /api/cal answered>}
+            Notify(`Sent ${e.detail.start} to ${e.detail.end} (${e.detail.response.days} days)`, 'info');
+        });
+    </script>
+</body>
+</html>
