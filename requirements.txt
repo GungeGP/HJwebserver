@@ -5,4 +5,3 @@ pyodbc==5.3.0        # mssql
 PyMySQL==1.1.1       # mysql
 python-dotenv==1.2.2
 PyJWT==2.14.0
-cryptography==44.0.3   # verifies Microsoft login tokens (RS256)

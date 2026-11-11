@@ -13,6 +13,9 @@ MAX_BODY_BYTES = 10 * 1024 * 1024
 # the connection is dropped, so a stalled client can't hold a thread forever.
 REQUEST_TIMEOUT = 30
 
+# Methods that change something: with auth on they need the form token.
+CHANGING_METHODS = ('POST', 'PUT', 'PATCH', 'DELETE')
+
 
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
@@ -61,18 +64,57 @@ class WebHandler(BaseHTTPRequestHandler):
 
     # --- authentication ---------------------------------------------------
 
-    def _authorize(self, method, handler_function=None, page=False):
-        """Enforce authentication for this request.
+    def _proxy_allowed(self):
+        """With auth on, only requests carrying the proxy's secret get any further.
+
+        Everything else - every path, static files and public pages too - gets
+        a bare 403. Called before anything else looks at the request, so
+        Authentik's user headers are never read from a request that skipped
+        the proxy.
+        """
+        if not getattr(self.server, 'auth', None):
+            return True
+        from WebServer.auth import proxy_secret_ok
+        self._proxy_ok = proxy_secret_ok(self)
+        if self._proxy_ok:
+            return True
+        self._reject_bare()
+        return False
+
+    def _reject_bare(self):
+        """403 with no body and nothing about why - not even what was sent.
+        Never framed, whatever securityHeaders/csp say."""
+        self.send_response(403)
+        self.send_header('Content-Length', '0')
+        self.send_header('Content-Security-Policy', "frame-ancestors 'none'")
+        self.send_header('X-Frame-Options', 'DENY')
+        self.end_headers()
+
+    def parse_request(self):
+        self._proxy_ok = False   # checked again for every request
+        return super().parse_request()
+
+    def send_error(self, code, message=None, explain=None):
+        # http.server's own errors (e.g. 501 for a method there is no do_ for)
+        # get the same bare 403 as everything else without the proxy's secret.
+        if (getattr(self.server, 'auth', None) and getattr(self, 'headers', None) is not None
+                and not getattr(self, '_proxy_ok', False)):
+            from WebServer.auth import proxy_secret_ok
+            if not proxy_secret_ok(self):
+                self._reject_bare()
+                return
+        super().send_error(code, message, explain)
+
+    def _authorize(self, method, handler_function=None):
+        """Enforce authentication for this request (the proxy's secret is already checked).
 
         Returns True when the request may proceed (and sets ``self.user``).
-        Otherwise writes a 401 response and returns False. When auth is
+        Otherwise writes a 401/403 response and returns False. When auth is
         disabled, or the route is marked ``public=True``, everything passes.
 
-        page=True (or a handler marked _hj_page) is an HTML page: opened in a
-        browser without a login, it is still sent, with self.user None, so
-        auth.js shows the login form on top of it. Everything the page loads
-        from the API still needs the login. Pages limited to roles= are not
-        shown this way; they get the plain login screen.
+        No user means Authentik sent none, which it only does for paths it
+        lets through without login. Changing requests (POST, PUT, DELETE)
+        also need the form token bound to the user (see WebServer.auth).
         """
         self.user = None
         if not getattr(self.server, 'auth', None):
@@ -86,37 +128,29 @@ class WebHandler(BaseHTTPRequestHandler):
         roles = getattr(handler_function, '_hj_roles', None)
 
         if not user:
-            if wants_html and not roles and (page or getattr(handler_function, '_hj_page', False)):
-                return True   # the page itself, with the login form drawn over it
-            # Other browser navigation gets the login shell; API calls get a
-            # JSON 401 that auth.js turns into the login overlay.
-            return self._deny(401, {"error": "Authentication required."}, login_shell=wants_html)
+            # API calls get JSON, which auth.js answers by reloading the page,
+            # so Authentik can show its login.
+            return self._deny(401, {"error": "Authentication required."}, html=wants_html)
 
-        # A pending password change blocks everything except the routes that
-        # let the user complete it (verify / change-password / logout-all).
-        if user.get("mustChangePassword") and not getattr(handler_function, '_hj_allow_pending_password', False):
-            return self._deny(403, {"error": "password_change_required"}, login_shell=wants_html)
+        from WebServer.auth import audit, describe_roles, form_token_ok, has_role
+        if method in CHANGING_METHODS and not form_token_ok(self, user):
+            audit("form_token_rejected", user.get("username"), f"{method} {self.path.split('?')[0]}", self)
+            return self._deny(403, {"error": "Missing or invalid form token (X-CSRF-Token)."})
 
         if roles:
-            from WebServer.auth import audit, describe_roles, has_role
             if not has_role(user.get("role"), roles):
                 # Path without the query string: searches can hold personal data.
                 audit("access_denied", user.get("username"),
                       f"{method} {self.path.split('?')[0]} needs {describe_roles(roles)}, has {user.get('role')}", self)
                 return self._deny(403, {"error": f"Forbidden: this requires role {describe_roles(roles)}."},
-                                  login_shell=False, html=wants_html)
+                                  html=wants_html)
 
         self.user = user
         return True
 
-    def _deny(self, status, payload, login_shell=False, html=False):
+    def _deny(self, status, payload, html=False):
         self.send_response(status)
-        if login_shell and hasattr(self.server, 'login_shell_html'):
-            self.send_header('Content-Type', 'text/html')
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
-            self.wfile.write(self.server.login_shell_html())
-        elif html:
+        if html:
             self.send_header('Content-Type', 'text/html')
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
@@ -128,6 +162,9 @@ class WebHandler(BaseHTTPRequestHandler):
         return False
 
     def handle_request(self, method):
+        self.user = None
+        if not self._proxy_allowed():
+            return
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         routes = getattr(self.server, 'routes', {})
@@ -190,9 +227,7 @@ class WebHandler(BaseHTTPRequestHandler):
         # 2. The Static Directory Fallback (and package assets)
         elif method == 'GET' and getattr(self.server, 'static_dir', None):
             file_path = self._resolve_static(path)
-            is_page = bool(file_path and os.path.isfile(file_path)
-                           and mimetypes.guess_type(file_path)[0] == 'text/html')
-            if not self._authorize(method, page=is_page):
+            if not self._authorize(method):
                 return
 
             if file_path and os.path.isfile(file_path):
