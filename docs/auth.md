@@ -1,283 +1,284 @@
 # Authentication
 
+The app has no login of its own. With `settings(auth=True)` it sits behind
+**Authentik**, as *forward auth* in the reverse proxy (Nginx Proxy Manager).
+People log in with their d1 account at Authentik, never in the app.
+
+```
+browser ──> proxy ──(is this person logged in?)──> Authentik
+              │                                       │
+              │ <──────── yes: who it is, groups ─────┘
+              │
+              └──> app   X-authentik-username, X-authentik-groups,
+                         X-authentik-email, X-authentik-name,
+                         X-Proxy-Secret
+```
+
+The proxy asks Authentik before every request. Someone who isn't logged in
+is sent to Authentik's login and never reaches the app. When they are, the
+proxy passes the request on with the user in `X-authentik-*` headers, plus a
+shared secret in `X-Proxy-Secret`.
+
+**The secret is what makes the headers trustworthy.** Every stack behind the
+proxy shares its network, and anything on it can call the app directly with
+any headers it likes. So with auth on, the app answers a request without the
+right secret with a bare `403` — on every path, public pages and static files
+included — and only reads the `X-authentik-*` headers after the secret checks out.
+
 ## Setup
 
-1. Put a signing secret in `.env` next to `main.py` (at least 32 bytes):
+### 1. `.env`
 
-   ```bash
-   python -c "import secrets; print('JWT_SECRET=' + secrets.token_hex(32))" > .env
-   ```
+Next to `main.py`, never committed (the keys are in `.env.example`):
 
-   The server refuses to start with `auth=True` if it is missing or too short.
-   Never commit `.env`; commit `.env.example` instead.
+| Key | What |
+|---|---|
+| `PROXY_SECRET` | The shared secret. The proxy sends the same value in `X-Proxy-Secret`. |
+| `JWT_SECRET` | Signs the [form token](#form-token). At least 32 bytes. |
 
-2. Enable auth and create users:
+Generate each with:
 
-   ```python
-   app.setDatabase(type="sqlite", dbName="app.db")
-   app.settings(auth=True)
-   app.createUser("alice", "correct-horse-battery")   # returns False if alice already exists
-   ```
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
 
-   Passwords must be at least 5 characters (`minPasswordLength`). Usernames are
-   case-insensitive. See [Managing users](users.md) for the CLI, roles,
-   temporary passwords and disabling accounts.
+With `auth=True` the app refuses to start when `PROXY_SECRET` is missing or
+empty, or `JWT_SECRET` is missing or shorter than 32 bytes. The message names
+the key, never a value.
 
-All options: [`settings(...)`](webserver.md#appsettingsauthnone-).
+Your app's own keys go in the same file — typically the names of the
+Authentik groups that give a role (`GROUP_ADMIN`, `GROUP_DEV`, ...). They are
+your app's, not the framework's. `.env` is read when `WebServer(...)` is
+created, so `os.environ` works in `main.py` from that line on, before `settings()`.
+
+### 2. The app
+
+```python
+import os
+from WebServer import WebServer
+
+app = WebServer(host="0.0.0.0", port=8080)   # reads .env, so os.environ works from here on
+app.setDatabase(...)
+app.settings(auth=True,
+             roleHierarchy=["dev", "admin", "user"],
+             authentikRoles={os.environ["GROUP_DEV"]: "dev",
+                             os.environ["GROUP_ADMIN"]: "admin"})
+```
+
+`host="0.0.0.0"` because the proxy reaches the app over the network. All
+options: [`settings(...)`](webserver.md#appsettingsauthnone-).
+
+### 3. Authentik
+
+What has to exist there (IT sets it up):
+
+- A **proxy provider** for the app in *forward auth (single application)*
+  mode, with the app's public address as its external host, and an
+  **application** that uses it. The outpost that serves the proxy must include it.
+- Under the provider's **unauthenticated paths**, the app's public paths. The
+  app prints them when it starts, ready to paste — see
+  [Public paths](#public-paths-for-authentik).
+- The **groups** that give roles, with the right people in them. Their names
+  go in the app's `.env`.
+- Who may use the app at all is decided in Authentik (the application's
+  bindings). Everyone Authentik lets through gets at least the lowest role.
+
+### 4. The proxy (Nginx Proxy Manager)
+
+The proxy host for the app needs Authentik's standard forward-auth
+configuration for Nginx Proxy Manager. What the app relies on:
+
+- Every request goes through Authentik's `auth_request`, and
+  `/outpost.goauthentik.io` is passed to Authentik's outpost (it serves the
+  login redirect and the sign-out).
+- The four user headers are set from Authentik's answer, replacing anything
+  the browser sent:
+
+  ```nginx
+  auth_request_set $authentik_username $upstream_http_x_authentik_username;
+  auth_request_set $authentik_groups   $upstream_http_x_authentik_groups;
+  auth_request_set $authentik_email    $upstream_http_x_authentik_email;
+  auth_request_set $authentik_name     $upstream_http_x_authentik_name;
+  proxy_set_header X-authentik-username $authentik_username;
+  proxy_set_header X-authentik-groups   $authentik_groups;
+  proxy_set_header X-authentik-email    $authentik_email;
+  proxy_set_header X-authentik-name     $authentik_name;
+  ```
+
+- The shared secret is added to every request:
+
+  ```nginx
+  proxy_set_header X-Proxy-Secret "<the PROXY_SECRET value>";
+  ```
+
+  The value lives only in the proxy host and in the app's `.env` on the stack —
+  never in a repository or a document.
 
 ## What "auth on" means
 
-**Everything requires login by default.** Every `@app.route`, every `addPath`
-page and every static file. To open something up, mark it public:
-
-```python
-@app.route('GET', '/api/health', public=True)
-def health(request): ...
-
-app.addPath('/welcome', 'public/welcome.html', public=True)
-```
-
-Static files in `public/` cannot be marked public individually; use `addPath(..., public=True)`
-for the specific ones you need.
-
-### What a logged-out visitor sees
-
-| Request | Response |
-|---------|----------|
-| Browser opens a protected page (`addPath` or an `.html` file in `public/`) | The page itself, with the login form on top. Everything it loads from the API still answers `401`, so it shows no data |
-| Browser opens a page limited to roles (`addPath(..., roles=["admin"])`) | A bare login page (the page's HTML is **not** sent) |
-| Browser opens a protected `@app.route` that returns HTML | A bare login page |
-| `fetch()` / API call to a protected route | `401` with `{"error": "Authentication required."}` |
-| Anything marked `public=True` | Served normally, and the login form **never** appears on its own, not even when an API call there answers `401`. The page can still open it with `hjAuth.showLogin()`, e.g. from a "Log in" button |
-
-Showing a protected page behind the login means its HTML can be read by
-anyone (view source). Keep private information out of the HTML itself and
-load it from the API, which stays protected; for a page whose layout should
-stay hidden too, add `roles=`.
-
-Once logged in, a protected handler can rely on `request.user`:
-
-```python
-@app.route('GET', '/api/my-entries')
-def my_entries(request):
-    username = request.user["username"]     # also: ["role"], ["mustChangePassword"]
-    ...
-```
-
-Routes and pages can additionally require a role — `@app.route(..., roles=["admin"])`
-— in which case other users get `403`. See [Managing users → Roles](users.md#roles).
-
-`request.user` is `None` on public routes even if the visitor is logged in; use
-`app.checkAuth(request)` there if you need to know.
-
-## Brute-force protection
-
-After `maxLoginAttempts` (default 5) failed logins for a username **or** from
-one IP address, further attempts get `429 Too Many Requests` with a
-`Retry-After` header for `lockoutMinutes` (default 15) — even with the correct
-password. The counter resets on a successful login. Lockouts are stored in
-the `LoginAttempts` table, so they survive restarts and can be lifted from the
-CLI while the server is running.
-
-### Getting a locked-out user back in
-
-| Way | How |
-|-----|-----|
-| Wait | The `429` response says how long (`"Try again in 847 seconds"`, plus a `Retry-After` header). |
-| Unlock from Python | `app.unlock("alice")` — lifts her lockout and any IP lockout her attempts caused. `app.unlock(ip="10.0.0.5")` for an address, `app.unlock()` for everything. |
-| See who is locked | `app.getLockouts()` → `[{"type": "username", "value": "alice", "failures": 5, "remaining": 612}, ...]` |
-| From the command line | `python -m WebServer unlock alice` (see [Managing users](users.md)). |
-
-Unlocking is recorded in the audit log as `lockout_cleared`.
-
-Login also takes the same amount of time whether or not the username exists,
-so an attacker cannot discover valid usernames by timing.
-
-## How a session works
-
-1. The browser posts `{"username", "password", "rememberMe"}` to `POST /api/login`.
-2. The server checks the password against the stored hash and, if it matches,
-   sets a cookie `hj_session=<signed token>` with `HttpOnly; SameSite=Strict`
-   and a lifetime of `tokenLifetimeHours` — or `rememberMeDays` when the
-   "Remember me" box was ticked.
-3. Every later request from the browser carries the cookie automatically, so your
-   own `fetch('/api/...')` calls need no special headers.
-4. `POST /api/logout` clears the cookie.
-
-Because the cookie is `HttpOnly`, JavaScript on the page can never read the
-token, which is what protects it from being stolen by injected scripts.
-
-The token is a signed JWT **and** a row in the `Sessions` table. Every request
-checks that the row still exists, which is what makes sessions revocable:
-
-| Action | Effect |
-|--------|--------|
-| `POST /api/logout` | that one session is deleted |
-| `POST /api/logout-all` | all of the user's sessions are deleted ("log out everywhere") |
-| user changes their password | every *other* session is deleted; the current one stays |
-| `app.revokeSessions(username)` | all of that user's sessions are deleted |
-| `app.setPassword(username, ...)` / `disableUser` / `deleteUser` | all sessions revoked |
-| idle for `idleTimeoutMinutes` (if set) | that session is deleted on its next request |
-| changing `JWT_SECRET` | every token becomes invalid |
-
-`app.getSessions(username)` lists a user's active sessions. Expired rows are
-cleaned up on each login.
-
-### Non-browser clients (scripts, tests, other services)
-
-Send the token as a bearer header instead of a cookie:
-
-```
-Authorization: Bearer <token>
-```
-
-Get a token from the JSON body of `POST /api/login` (`"token"`) or from
-`app.createAuth(username)` in Python. Set `settings(bearerTokens=False)` to
-refuse the header entirely if only browsers will ever call the server.
-
-## Passwords
-
-- Stored as salted scrypt hashes (`scrypt$<salt>$<hash>`) in `Users.PasswordHash`.
-  The plaintext is never written.
-- `app.createUser` / `app.setPassword` (and the CLI) do the hashing. Don't insert
-  into `Users` directly.
-- **Users change their own password** with the "Change password" form
-  (`POST /api/change-password` with `currentPassword` + `newPassword`). The
-  current password is required; other sessions are logged out.
-- **Temporary passwords:** an admin can mark a password as must-change
-  (`--temporary` / `mustChangePassword=True`). The user is forced through the
-  change-password form before anything else works.
-- Rows that still contain a plaintext password (from before hashing existed) are
-  accepted on the next login and upgraded to a hash at that moment.
-- There is no self-registration endpoint and no "forgot password" e-mail flow;
-  an admin resets passwords with `python -m WebServer setpassword <name> --temporary`.
-
-## Microsoft login (SSO)
-
-Off unless the app sets `ssoDomains`. Then the login form asks for a username
-or work email first, and the server decides: an address in `ssoDomains` (or a
-bare name like `mgu`) goes to Microsoft, a local account gets a password field.
-The password login keeps working next to it unless `ssoOnly=True`.
-
-```python
-app.settings(auth=True, ssoDomains=["hjoerring.dk"])
-```
-
-The app registration comes from `.env` (`MS_TENANT_ID`, `MS_CLIENT_ID`,
-`MS_CLIENT_SECRET`). Everything else — `ssoOnly`, `localAccounts`, Microsoft
-groups as roles, ranked roles with `roleHierarchy`, what to ask IT for — is in
-[Sign-in form — Microsoft login](SignInForm.md).
-
-## Framework routes
-
-| Route | Public | Body / response |
-|-------|--------|-----------------|
-| `GET /api/login-config` | yes | `{"title", "message", "logo", "rememberMe", "minPasswordLength"}` for the login form |
-| `POST /api/login` | yes | body `{"username", "password", "rememberMe"?}` → `200 {"valid": true, "token", "user"}` + cookie; `401` wrong; `403` disabled; `429` locked |
-| `POST /api/logout` | yes | clears the cookie → `200` |
-| `POST /api/logout-all` | no | revokes every session of the user → `200` |
-| `GET /api/verify` | no | `200 {"valid": true, "user": {"username", "role", "mustChangePassword", "source", "displayName"}, "roleHierarchy"}` or `401` |
-| `POST /api/login/start` | yes | body `{"username", "next"?}` → `{"method": "microsoft", "redirect"}` or `{"method": "password"}`; `403` under `ssoOnly`. Only with `ssoDomains` |
-| `GET /auth/microsoft/callback` | yes | Where Microsoft sends the browser back. Only with `ssoDomains` |
-| `POST /api/change-password` | no | body `{"currentPassword", "newPassword"}` → `200`; `401` wrong current; `400` policy |
-
-While a password change is pending, every other protected route answers
-`403 {"error": "password_change_required"}`.
-
-## Changing how the login looks
-
-| What | How |
+| Request | Answer |
 |---|---|
-| Title, message, logo | `settings(auth=True, loginTitle="...", loginMessage="...", loginLogo="/img/logo.png")` |
-| All of the styling | Put your own `public/css/auth.css` in the project. It replaces the framework's copy completely, so start from a copy of `WebServer/public/css/auth.css` |
-| A few rules, on one page | Ordinary CSS in your page, e.g. `html #login-overlay { background-color: rgba(255,255,255,.35); }` |
+| Without the right `X-Proxy-Secret` — any path, any method | `403`, no body. Nothing says why |
+| A `public=True` route or page | Served, with or without a user. `request.user` is `None` |
+| Anything else, with a user from Authentik | Served, with `request.user` set |
+| Anything else, without a user | `401`: `{"error": "Authentication required."}`, or a short HTML page when a browser asks for one |
+| A route with `roles=[...]` the user doesn't have | `403`: `{"error": "Forbidden: this requires role admin or higher."}` |
+| `POST`, `PUT` or `DELETE` to a protected route without the [form token](#form-token) | `403`: `{"error": "Missing or invalid form token (X-CSRF-Token)."}` |
 
-A protected page is sent with the login form on top, so your page's own CSS
-styles the login too. That's how a
-[TableViewer ghost table shows behind the login](tableviewer.md#showing-the-table-behind-the-login).
-Pages limited to `roles=` get the framework's bare login page instead, which
-only `auth.css` styles.
+"Without a user" only happens on a path Authentik lets through without a
+login (an unauthenticated path), or when the proxy isn't set up to send the
+headers. Normally Authentik has already shown its login.
 
-### Your own `auth.css`
+Mark what should be reachable without a login:
 
-When the browser asks for `/css/auth.css`, the framework serves
-`public/css/auth.css` from your project if it exists, and its own copy only
-otherwise. The same goes for every framework file: `public/js/auth.js`,
-`public/css/TableViewer.css`, and so on. These files are sent uncached, so
-a change shows on the next reload.
+```python
+app.settings(auth=True)
+app.addPath('/', 'public/index.html', public=True)
+app.addPath('/sager', 'public/sager.html')
 
-Your file **replaces** the framework's, it doesn't add to it. Copy
-`WebServer/public/css/auth.css` into `public/css/` and edit from there,
-otherwise everything you don't restyle loses its styling.
-
-What the login form is made of (drawn by `auth.js`):
-
-| Selector | What it is |
-|---|---|
-| `#login-overlay` | The full-screen layer behind the form (dark and blurred by default) |
-| `.login-box` | The card holding the form |
-| `.login-box .headerLine` | The colored bar at the top of the card |
-| `.login-box img.logo` | The logo, when `loginLogo=` is set |
-| `#login-form h2`, `#login-form p` | Title and message (`loginTitle=`, `loginMessage=`) |
-| `#username`, `#password` | The input fields |
-| `.login-box label.remember` | "Remember me" (hidden with `rememberMeDays=0`) |
-| `#login-btn` | Sign in; disabled until both fields are filled |
-| `#change-form` | The change-password form: `#current-password`, `#new-password`, `#confirm-password`, `#change-btn` |
-| `#change-cancel`, `.login-box button.secondary` | Cancel on the change-password form |
-
-**Keep `display: none` on `#login-overlay`.** `auth.js` switches it to
-`display: flex` to show the form and back to `none` after login. Without
-`display: none` in your CSS, the login box stays on screen once you're logged in.
-
-Example: a see-through background and a card in your own colors.
-
-```css
-#login-overlay {
-    position: fixed; inset: 0; z-index: 9999;
-    display: none; justify-content: center; align-items: center;
-    background: rgba(255, 255, 255, 0.35);
-}
-.login-box {
-    background: #fff; border-radius: 12px; width: clamp(300px, 30vw, 400px);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15); overflow: hidden; text-align: center;
-}
-.login-box .headerLine { height: 6px; background: #00563B; }
-.login-box form { display: flex; flex-direction: column; padding: 24px; }
-.login-box input[type="text"], .login-box input[type="password"] {
-    margin-bottom: 12px; padding: 10px; border: 1px solid #d0d7de; border-radius: 8px;
-}
-.login-box button { padding: 10px; border: none; border-radius: 8px; background: #00563B; color: #fff; cursor: pointer; }
-.login-box button:disabled { background: #e3edf3; color: #2c3531; cursor: not-allowed; }
-.login-box button.secondary { background: none; color: #00563B; }
+@app.route('GET', '/api/aabningstider', public=True)
+def aabningstider(request): ...
 ```
 
-### What CSS can't change
+Static files in `public/` cannot be marked public individually; use
+`addPath(..., public=True)` for the ones you need.
 
-CSS changes how the form looks, not what's in it. Which fields and buttons
-exist, and in what order, comes from `auth.js`. The text and logo come from
-`settings()`.
+`request.user` is `None` on public routes; use `app.checkAuth(request)` there
+to see whether Authentik sent a user.
 
-A different form, such as other fields or the email-first layout in
-[SignInForm.md](SignInForm.md), means overriding `public/js/auth.js` the same
-way. That works, but your copy then *is* the login: a mistake in it can lock
-everyone out, and later fixes to the framework's `auth.js` won't reach you.
-Keep the parts the server relies on: posting `{"username", "password",
-"rememberMe"}` to `/api/login`, reloading after a successful login, and
-showing the form again when a request answers `401`.
+## `request.user`
+
+```python
+@app.route('GET', '/api/me')
+def me(request):
+    send_json(request, 200, {"user": request.user})
+```
+
+```python
+{"username": "aje", "name": "Anna Jensen", "email": "aje@example.org",
+ "role": "admin", "groups": ["Staff", "Case admins"]}
+```
+
+| Key | From |
+|---|---|
+| `username` | `X-authentik-username`, trimmed and lower-cased |
+| `name` | `X-authentik-name`; the username when it is empty |
+| `email` | `X-authentik-email`; `""` when it is empty |
+| `groups` | `X-authentik-groups`, split on `\|` |
+| `role` | worked out from `groups`, see below |
+
+## Roles from Authentik groups
+
+`authentikRoles` maps Authentik group names to the app's roles:
+
+```python
+app.settings(auth=True,
+             roleHierarchy=["dev", "admin", "user"],
+             authentikRoles={os.environ["GROUP_DEV"]: "dev",
+                             os.environ["GROUP_ADMIN"]: "admin"})
+
+@app.route('DELETE', '/api/sag', roles=["admin"])        # admin and dev may
+def slet_sag(request): ...
+
+app.addTableViewer('/api/sager', table=..., edit=["admin"], delete=["admin"])
+```
+
+- **With `roleHierarchy`** the user gets the highest role among their groups,
+  and `roles=["admin"]` means "admin or higher".
+- **Without it** the user gets the role of the first group in
+  `authentikRoles` they are a member of, and `roles=[...]` must match exactly.
+- **In none of the groups:** the lowest role — the last in `roleHierarchy`,
+  or `"user"` without one. Authentik has already decided the person may use the app.
+
+Group names are matched exactly. The role is worked out on every request, so a
+change of groups in Authentik applies as soon as Authentik sends the new list.
+A role in `authentikRoles` or in a route's `roles=` that isn't in
+`roleHierarchy` stops the app at start-up, so a typo can't silently lock people out.
+
+## Form token
+
+Every `POST`, `PUT` and `DELETE` to a protected route must carry a token bound
+to the user in the `X-CSRF-Token` header. That stops a page on another site
+from sending a form in the user's name: the browser would bring Authentik's
+cookie along, but the page can't know the token.
+
+**Pages that use the framework's scripts send it by themselves.** `auth.js`
+gets it from `GET /api/verify` and adds it to every changing `fetch()` to the
+same site — your own calls, TableViewer and the calendar alike:
+
+```js
+fetch('/api/sag', {method: 'DELETE'})   // gets the token from the framework
+```
+
+Two things don't get it: a plain HTML `<form method="post">` and
+`XMLHttpRequest`. Send those with `fetch()` instead.
+
+The token is an HMAC of the username with `JWT_SECRET`. Changing `JWT_SECRET`
+makes every open page fetch a new one on its next reload.
+
+## Logging out
+
+`GET /logout` writes `logout` to the audit log and sends the browser on to
+Authentik's sign-out (`/outpost.goauthentik.io/sign_out`). That ends the
+login at Authentik, for every app behind it. In a page, a
+`<button id="logout">` or `hjAuth.logout()` does the same — see
+[Frontend](frontend.md#authjs--who-is-logged-in).
+
+## Local development without Authentik
+
+`devUser` makes the app behave as if a given user with given groups were
+logged in:
+
+```python
+app = WebServer(port=8080)   # listens on 127.0.0.1 only
+app.settings(auth=True,
+             roleHierarchy=["dev", "admin", "user"],
+             authentikRoles={os.environ["GROUP_ADMIN"]: "admin"},
+             devUser={"username": "test", "groups": [os.environ["GROUP_ADMIN"]]})
+```
+
+At start it says so:
+
+```
+[ auth ] UDVIKLINGSTILSTAND: alle er "test" (admin)
+```
+
+- Every request is that user. `X-Proxy-Secret` and the `X-authentik-*`
+  headers are not checked, and `PROXY_SECRET` isn't needed. `JWT_SECRET` is,
+  and the form token is checked as usual.
+- `devUser` may also have `"name"` and `"email"`.
+- **The app refuses to start with `devUser` unless `host` is `127.0.0.1`,
+  `localhost` or `::1`**, so it can't be reached from other machines.
+- `/logout` still goes to Authentik's sign-out, which doesn't exist locally.
+
+## Public paths for Authentik
+
+With `auth=True`, the app prints its public paths at start, one regular
+expression per line, ready for the provider's unauthenticated paths in Authentik:
+
+```
+[ auth ] Offentlige stier — sæt dem ind i Authentik som "stier uden login":
+^/$
+^/api/aabningstider$
+^(/public)?/js/auth\.js$
+^(/public)?/js/webserver\.js$
+...
+^/logout$
+```
+
+Your own `public=True` routes and pages come first. After them come the
+framework's scripts and styles, which public pages load, and `/logout`.
+Paste the whole list. If a path is public in the app but not in Authentik,
+visitors without a login are sent to Authentik's login anyway; the other way
+round, the app still refuses them.
 
 ## HTTPS
 
-Without TLS, passwords and session cookies cross the network in the clear. On a
-trusted LAN that may be acceptable; anywhere else, turn it on:
-
-```python
-app.useHttps("cert.pem", "key.pem")
-```
-
-This also adds the `Secure` flag to the cookie and a `Strict-Transport-Security`
-header. See [`useHttps`](webserver.md#appusehttpscertfile-keyfile) for generating a
-self-signed certificate. If you instead terminate TLS on a reverse proxy, pass
-`settings(secureCookie=True, trustProxy=True)`.
+Behind the proxy, TLS ends at the proxy, and the app is reached over the
+stack's internal network. Pass `settings(trustProxy=True)` so the audit log
+records the client's address from `X-Forwarded-For` instead of the proxy's.
+`useHttps` still exists for an app that serves TLS itself; see
+[`useHttps`](webserver.md#appusehttpscertfile-keyfile).
 
 ## Security headers
 
@@ -290,7 +291,7 @@ Every response carries:
 | `Referrer-Policy` | `same-origin` | URLs are not leaked to other sites |
 | `Content-Security-Policy` | see below | limits where scripts, styles, images may load from |
 | `Strict-Transport-Security` | `max-age=31536000` | HTTPS only; sent when `useHttps` is on |
-| `Cache-Control` | `no-store` | only on authenticated responses, so protected data is never cached |
+| `Cache-Control` | `no-store` | only on responses to a user, so protected data is never cached |
 
 The default CSP allows same-origin and `https:` sources plus inline scripts and
 styles (teammates' pages commonly use both), and forbids framing. Loading
@@ -301,7 +302,11 @@ app.settings(auth=True, csp="default-src 'self'; frame-ancestors 'none'")   # st
 app.settings(auth=True, csp=None)                                           # no CSP header
 ```
 
-A handler that sets one of these headers itself wins over the default.
+A handler that sets one of these headers itself wins over the default. The
+bare `403` for a request without the proxy's secret always carries
+`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`,
+whatever `csp` and `securityHeaders` say. Keep `frame-ancestors 'none'` in your
+own `csp`, so the app's pages can't be shown in a frame either.
 
 ## Audit log
 
@@ -310,38 +315,26 @@ table and printed to the console:
 
 | Event | When | Detail |
 |-------|------|--------|
-| `user_created` | `app.createUser` / `createuser` | `role=admin, by terminal (d1misgu)` |
-| `role_changed` | `app.setRole` / `setrole` | old and new role: `user -> admin, by python (d1misgu)` |
-| `user_deleted` | `app.deleteUser` / `deleteuser` | the role the user had: `role=user, by terminal (d1misgu)` |
-| `user_disabled`, `user_enabled` | `app.disableUser` / `app.enableUser` | `by terminal (d1misgu)` |
-| `access_denied` | a logged-in user calls a route their role doesn't allow (403) | `PUT /api/x needs admin, has user` (no query string) |
-| `password_changed` | by the user themselves, or set with `app.setPassword` / `setpassword` | `by user`, or `temporary, by terminal (d1misgu)` |
-| `password_change_failed` | wrong current password when changing it | |
-| `password_rehashed` | an old plain-text password was upgraded at login | |
-| `login_ok`, `login_failed`, `login_locked`, `login_disabled` | `/api/login` | |
-| `logout`, `logout_all` | `/api/logout`, `/api/logout-all` | |
-| `session_idle_expired` | a session ended after being idle too long | |
-| `sessions_revoked` | `app.revokeSessions` | |
-| `lockout_cleared` | `app.unlock` | |
-| `token_issued` | `app.createAuth` | |
+| `logout` | `GET /logout` | |
+| `access_denied` | a user calls a route their role doesn't allow (403) | `PUT /api/x needs admin or higher, has user` (no query string) |
+| `form_token_rejected` | a `POST`, `PUT` or `DELETE` without a valid form token | `DELETE /api/sag` (no query string) |
 | anything you like | `app.audit(request, event, detail)` | |
 
-For user changes, `Username` is the user who was changed, and `Detail` ends
-with who made the change: `by terminal` for `python -m WebServer ...`,
-`by python` for code calling the `app.` methods (like `main.py`), followed by
-the operating system account that ran it, e.g. `by terminal (d1misgu)`. No one
-is logged in to the site there, so the account comes from the machine: it says
-which login was used, which is only as trustworthy as access to that machine.
+Logins happen at Authentik, so they are in Authentik's own log, not here.
+Rows from before the app moved behind Authentik (`login_ok`, `user_created`,
+...) stay in the table.
 
 Changes to data made through a table viewer are not in the audit log; they
 are in [`tableviewLedger`](tableviewer.md#tableviewledger-what-exactly-changed),
 with the old and new values.
 
-Read it back with `app.getAuditLog(limit=100, username=None)`. Each row has
-`At` (epoch seconds), `Username`, `Event`, `Detail`, `Ip`. The IP is the direct
-peer unless `trustProxy=True`, in which case `X-Forwarded-For` is used.
+Read it back with `app.getAuditLog(limit=100, username=None)` or
+`python -m WebServer audit`. Each row has `At` (epoch seconds), `Username`,
+`Event`, `Detail`, `Ip`. The IP is the direct peer unless `trustProxy=True`,
+in which case `X-Forwarded-For` is used. `auditRetentionDays` deletes rows
+older than that at start.
 
 ## Turning auth off
 
-Omit `settings(auth=True)`. Then no login page is shown, no routes are
-protected, and `request.user` is always `None`. `public=` flags are ignored.
+Omit `settings(auth=True)`. Then nothing is protected, no secret or header is
+checked, `request.user` is always `None`, and `public=` flags are ignored.

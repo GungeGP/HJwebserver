@@ -14,12 +14,21 @@ you typically call them.
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `host` | `"127.0.0.1"` | Interface to listen on. Use `"0.0.0.0"` to accept connections from other machines. |
+| `host` | `"127.0.0.1"` | Interface to listen on. Use `"0.0.0.0"` to accept connections from other machines, e.g. from the proxy in front of the app. |
 | `port` | `8000` | TCP port. |
 | `static_dir` | `None` | Folder to serve static files from. When omitted the framework looks for a `public/` folder next to your script, then in the current directory. |
 | `threaded` | `True` | Handle requests at the same time, each in its own thread. `False` handles one request at a time, as before. See [Threads](#threads). |
 
 On startup it prints which folder (if any) is used for static files.
+
+It also reads `.env`, so `os.environ` holds your keys from the next line on —
+before `settings()`:
+
+```python
+import os
+app = WebServer(host="0.0.0.0", port=8080)   # reads .env
+group = os.environ["GROUP_ADMIN"]
+```
 
 ### Threads
 
@@ -28,8 +37,7 @@ export or a call to another service, no longer makes everyone else wait.
 At most `app.max_threads` requests (default 32) run at once; more wait in line.
 
 The framework's own code is safe with threads: every query opens its own
-database connection, login lockout counting and TableViewer edits run one at a
-time, and the TLS handshake (with `useHttps`) happens in each request's own thread.
+database connection, TableViewer edits run one at a time, and the TLS handshake (with `useHttps`) happens in each request's own thread.
 
 **Your own handlers** may now run at the same time as each other. That only
 matters if they share something in Python memory:
@@ -96,46 +104,26 @@ so wrong credentials fail here rather than on the first request.
 
 ## `app.settings(auth=None, ...)`
 
-Turn on authentication and tune security. See [Authentication](auth.md).
+Put the app behind Authentik and tune security. See [Authentication](auth.md).
 
 ```python
-app.settings(auth=True)                                   # sensible defaults
-app.settings(auth=True, tokenLifetimeHours=8, maxLoginAttempts=3)
+app.settings(auth=True)                                   # needs PROXY_SECRET and JWT_SECRET in .env
+app.settings(auth=True,
+             roleHierarchy=["dev", "admin", "user"],
+             authentikRoles={os.environ["GROUP_DEV"]: "dev", os.environ["GROUP_ADMIN"]: "admin"})
 ```
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `auth` | `None` | `True` enables login. **Every route and page then requires login** unless registered with `public=True`. |
-| `jwtSecret` | `None` | Secret used to sign sessions, at least 32 bytes. Defaults to `JWT_SECRET` from `.env`. Missing or too short → `RuntimeError` at startup. |
-| `tokenLifetimeHours` | `24` | How long a normal login stays valid. |
-| `rememberMeDays` | `30` | Lifetime when the user ticks "Remember me". `0` hides the checkbox. |
-| `idleTimeoutMinutes` | `0` | Log out sessions with no request for this long. `0` = off. |
-| `secureCookie` | `False` | Add the `Secure` flag to the session cookie. Turned on automatically by `useHttps()`. |
-| `bearerTokens` | `True` | Also accept `Authorization: Bearer <token>` (for scripts). `False` = cookie only. |
-| `maxLoginAttempts` | `5` | Failed logins (per username *and* per IP) before a lockout. |
-| `lockoutMinutes` | `15` | How long a lockout lasts. |
-| `minPasswordLength` | `5` | Enforced by `createUser` / `setPassword`. |
-| `auditLog` | `True` | Write logins, logouts, lockouts, user and role changes and refused access to the `AuditLog` table. |
-| `trustProxy` | `False` | Take the client IP from `X-Forwarded-For`. Only set behind a reverse proxy you control. |
+| `auth` | `None` | `True` puts the app behind Authentik. **Every request must carry `PROXY_SECRET` in `X-Proxy-Secret`** (else a bare `403`), and every route and page needs a user from Authentik unless registered with `public=True`. Refuses to start without `PROXY_SECRET`, or with a `JWT_SECRET` shorter than 32 bytes. |
+| `roleHierarchy` | `None` | Ranked roles, highest first, e.g. `["dev", "admin", "user"]`. `roles=[...]` then means "this role or higher". `None` = exact match. |
+| `authentikRoles` | `None` | `{Authentik group name: role}`. The user gets the highest matching role (with `roleHierarchy`) or the first match; in none of the groups, the lowest role. See [Roles from Authentik groups](auth.md#roles-from-authentik-groups). |
+| `devUser` | `None` | `{"username": ..., "groups": [...]}` (optionally `"name"`, `"email"`): every request is this user, and no secret or header is checked. Only allowed when `host` is `127.0.0.1`, `localhost` or `::1`. See [Local development](auth.md#local-development-without-authentik). |
+| `auditLog` | `True` | Write logouts, refused access and refused form tokens to the `AuditLog` table. |
+| `auditRetentionDays` | `None` | Delete audit log rows older than this, at start. `None` = keep forever. |
+| `trustProxy` | `False` | Take the client IP from `X-Forwarded-For`. Set it behind the proxy. |
 | `csp` | a default policy | `Content-Security-Policy` header value. `None` sends none. See [Authentication → Security headers](auth.md#security-headers). |
 | `securityHeaders` | `True` | Send `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, CSP (and HSTS on HTTPS). |
-| `loginTitle` | `"Access Restricted"` | Heading on the login form. |
-| `loginMessage` | `"Please log in to continue."` | Text under the heading. |
-| `loginLogo` | `None` | URL of an image shown above the form, e.g. `"/logo.png"`. |
-| `roleHierarchy` | `None` | Ranked roles, highest first, e.g. `["dev", "admin", "user"]`. `roles=[...]` then means "this role or higher". `None` = exact match. |
-| `auditRetentionDays` | `None` | Delete audit log rows older than this. `None` = keep forever. |
-| `ssoDomains` | `None` | Turns on Microsoft login, e.g. `["hjoerring.dk"]`. Needs `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` in `.env`. |
-| `ssoOnly` | `False` | No password login except for `localAccounts`. |
-| `localAccounts` | `None` | Under `ssoOnly`: names that may still use a password. |
-| `microsoftNewUsers` | `False` | Create users on their first Microsoft login. |
-| `microsoftRoles` | `None` | `{Entra group id: role}`, read from Microsoft Graph at every login. |
-| `microsoftGuests` | `False` | Allow guest accounts from other organizations. |
-| `microsoftSessionHours` | `8` | Session lifetime for Microsoft users. |
-| `microsoftLogout` | `True` | Logout also signs out at Microsoft. |
-| `microsoftCheckEnabled` | `False` | Every 10 minutes, end sessions of users disabled in Entra. |
-| `microsoftRedirectUri` | `None` | Override the callback URL built from the request's host. |
-
-The Microsoft parameters are explained in [Sign-in form — Microsoft login](SignInForm.md).
 
 Calling `settings()` without `auth=True` (or not at all) leaves the server fully open.
 
@@ -144,7 +132,7 @@ Calling `settings()` without `auth=True` (or not at all) leaves the server fully
 ## `app.useHttps(certfile, keyfile)`
 
 Serve over TLS. Takes paths to a PEM certificate and private key. Also turns
-on the `Secure` cookie flag and the HSTS header.
+on the HSTS header. Behind the proxy you don't need it: TLS ends at the proxy.
 
 ```python
 app.useHttps("cert.pem", "key.pem")
@@ -167,7 +155,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 36
 
 Certificates expire (Let's Encrypt: 90 days) and `useHttps` does not renew
 them. If you want automatic renewal, run a reverse proxy such as Caddy or nginx
-in front of the app instead, and pass `settings(secureCookie=True, trustProxy=True)`.
+in front of the app instead, and pass `settings(trustProxy=True)`.
 
 Raises `FileNotFoundError` if either file is missing.
 
@@ -181,7 +169,7 @@ Serve one file at a fixed URL.
 |-----------|---------|
 | `url_path` | URL to respond on, e.g. `'/'` or `'/report'`. |
 | `file_path` | File to send, relative to the project root, e.g. `'public/index.html'`. |
-| `public` | When auth is on: `True` makes this page viewable without login. |
+| `public` | When auth is on: `True` makes this page viewable without a user from Authentik. |
 | `roles` | List of roles allowed to view it, e.g. `["admin"]`. Others get `403`. |
 
 ```python
@@ -203,7 +191,7 @@ Register a handler function for a URL. See [Routes & requests](routes.md).
 |-----------|---------|
 | `method` | `'GET'`, `'POST'`, `'PUT'` or `'DELETE'`. |
 | `path` | Exact URL path, e.g. `'/api/data'`. Query strings are ignored for matching. |
-| `public` | When auth is on: `True` lets anyone call this route. |
+| `public` | When auth is on: `True` lets anyone call this route (the proxy's secret is still required). |
 | `roles` | List of roles allowed to call it, e.g. `["admin"]`. Others get `403`. |
 
 ```python
@@ -221,49 +209,6 @@ response itself (see [Routes & requests](routes.md#sending-a-response)).
 
 ---
 
-## User management
-
-All of these are also available as `python -m WebServer <command>`; see
-[Managing users](users.md) for the full story.
-
-| Method | Returns | Notes |
-|--------|---------|-------|
-| `createUser(username, password, role="user", mustChangePassword=False)` | `True` / `False` if exists | Hashes the password. `ValueError` if shorter than `minPasswordLength`. |
-| `setPassword(username, password, mustChangePassword=False)` | `True` / `False` if no user | Logs the user out everywhere. `mustChangePassword=True` = temporary password. |
-| `setRole(username, role)` | `True` / `False` | Effective on the user's next request. |
-| `disableUser(username)` / `enableUser(username)` | `True` / `False` | Disable blocks login and ends sessions; the row is kept. |
-| `deleteUser(username)` | `True` / `False` | Removes user and sessions. |
-| `getUser(username)` | dict or `None` | `{"username", "role", "disabled", "mustChangePassword"}` |
-| `listUsers()` | list of dicts | Same shape, sorted by name. |
-| `revokeSessions(username)` | – | Log a user out of every browser/device. |
-| `getSessions(username)` | list of rows | `Jti`, `CreatedAt`, `LastSeen`, `ExpiresAt` (epoch seconds). |
-
-Usernames are case-insensitive (stored lower-case).
-
----
-
-## `app.unlock(username=None, ip=None)`
-
-Lift a login lockout early. `unlock("alice")` clears her counter and any IP
-lockout caused by her attempts; `unlock(ip="10.0.0.5")` clears an address;
-`unlock()` clears everything. Returns how many entries were removed.
-
----
-
-## `app.getLockouts()`
-
-Who is currently locked out: a list of `{"type": "username" | "ip", "value",
-"failures", "remaining"}` (seconds).
-
----
-
-## `app.getSessions(username)`
-
-List of active sessions for a user. Each row has `Jti`, `Username`, `CreatedAt`,
-`ExpiresAt` (epoch seconds).
-
----
-
 ## `app.audit(request, event, detail=None)`
 
 Write your own entry to the audit log, attributed to the request's user and IP.
@@ -278,8 +223,8 @@ def wipe(request):
 
 ## `app.getAuditLog(limit=100, username=None)`
 
-Most recent audit entries, newest first. Rows have `Id`, `At` (epoch seconds),
-`Username`, `Event`, `Detail`, `Ip`. See [Authentication → Audit log](auth.md#audit-log)
+Most recent audit entries, newest first (also `python -m WebServer audit`).
+Rows have `Id`, `At` (epoch seconds), `Username`, `Event`, `Detail`, `Ip`. See [Authentication → Audit log](auth.md#audit-log)
 for the built-in event names.
 
 ---
@@ -295,18 +240,13 @@ says whether the server is threaded (`(32 threads)`) or `(single-threaded)`.
 
 ### `app.checkAuth(request)`
 
-Returns `{"username": ...}` if the request carries a valid session, else `None`.
-Inside a protected route you don't need this — `request.user` is already set.
-It is for `public=True` routes that want to behave differently for logged-in users.
+Returns the user Authentik sent with the request (the same dict as
+`request.user`), else `None`. Inside a protected route you don't need this —
+`request.user` is already set. It is for `public=True` routes that want to
+behave differently for logged-in users. Always `None` without `auth=True`.
 
 ### `app.getDatabaseConnection()`
 
 Returns a raw DB-API connection for the configured backend, for queries the
 helpers don't cover. You must `close()` it. See [Database](database.md#your-own-queries)
 for the higher-level helpers, which are usually easier.
-
-### `app.createAuth(username)`
-
-Returns a signed session token for `username` without checking a password.
-Useful for scripts or tests that call the API with `Authorization: Bearer <token>`.
-Requires `settings(auth=True)`.

@@ -2,7 +2,7 @@
 
 A small Python web framework for internal tools. You write a `main.py`, register a
 few routes, and the framework handles static files, JSON parsing, the database
-connection and login.
+connection and — behind Authentik — who is logged in.
 
 ## Pages
 
@@ -12,9 +12,9 @@ connection and login.
 | [WebServer reference](webserver.md) | Every method on the `app` object and its parameters |
 | [Routes & requests](routes.md) | Writing handlers, reading the request, sending responses |
 | [Database](database.md) | `setDatabase` backends, running your own queries |
-| [Authentication](auth.md) | How login works, sessions, protecting routes |
-| [Managing users](users.md) | CLI and Python API for users, roles, passwords, lockouts |
-| [Frontend](frontend.md) | Shared header/footer includes, the login overlay, `hjAuth`, `Notify` |
+| [Authentication](auth.md) | Login via Authentik: `.env`, Authentik and the proxy, protecting routes, the form token |
+| [Users and roles](users.md) | Roles from Authentik groups, and the audit log on the command line |
+| [Frontend](frontend.md) | Shared header/footer includes, `hjAuth`, `Notify` |
 | [TableViewer](tableviewer.md) | Database tables in a page: search, filters, lookups, related tables, editing |
 
 ## Getting started
@@ -36,7 +36,6 @@ from WebServer.helper import send_json
 
 app = WebServer(port=8080)
 app.setDatabase(type="sqlite", dbName="app.db")
-app.settings(auth=True)
 app.addPath('/', 'public/index.html')
 
 @app.route('GET', '/api/me')
@@ -47,26 +46,25 @@ if __name__ == "__main__":
     app.start()
 ```
 
-Before the first run, create `.env` with a signing secret (see [Authentication](auth.md#setup)):
+That app is open to everyone, which is fine on your own machine. To put it
+behind Authentik, so people log in with their d1 account, add one line:
 
-```bash
-python -c "import secrets; print('JWT_SECRET=' + secrets.token_hex(32))" > .env
+```python
+app.settings(auth=True)   # needs PROXY_SECRET and JWT_SECRET in .env; the user comes from Authentik
 ```
 
-and create at least one user (nobody can log in otherwise):
-
-```bash
-python -m WebServer createuser alice --role admin
-```
-
-(or `app.createUser("alice", "correct-horse-battery")` from Python — see [Managing users](users.md)).
+The app then needs a proxy and Authentik in front of it, and `request.user`
+holds who is logged in. What to put in `.env`, and what to set up in Authentik
+and the proxy, is in [Authentication](auth.md#setup). To try it on your own
+machine without Authentik, see
+[Local development](auth.md#local-development-without-authentik).
 
 ### Project layout
 
 ```
 my-app/
 ├── main.py          # your app: routes, settings
-├── .env             # JWT_SECRET=...
+├── .env             # PROXY_SECRET=..., JWT_SECRET=..., your own keys
 └── public/          # static files, served automatically
     └── index.html
 ```
@@ -76,8 +74,8 @@ HTML files automatically get the framework scripts injected before `</body>`.
 
 ### The order of calls
 
-`setDatabase` → `settings` → `addPath` / `route` → `start`. In practice only two
+`WebServer(...)` → `setDatabase` → `settings` → `addPath` / `route` → `start`. In practice only two
 rules matter:
 
-- `setDatabase` must come before `createUser` / `setPassword` (they need the database).
-- `start()` is last; it blocks until Ctrl+C.
+- `WebServer(...)` reads `.env`, so `os.environ` can be used for `settings()` on the lines after it.
+- `start()` is last; it blocks until Ctrl+C. It also prints the public paths to paste into Authentik.

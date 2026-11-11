@@ -1,65 +1,48 @@
-"""Authentication: password hashing, sessions, roles, lockout, audit and the login routes.
+"""Authentication behind Authentik: proxy secret, user headers, roles, form token, audit.
 
-A session is a signed JWT whose ``jti`` must also exist in the ``Sessions``
-table. That makes sessions revocable: logout deletes one row, changing a
-password or calling ``revokeSessions`` deletes all rows for a user.
+The app has no login of its own. Authentik sits in front of it as forward
+auth in the proxy (Nginx Proxy Manager): the proxy asks Authentik before every
+request and only passes it on when the user is logged in. It then adds the
+user in ``X-authentik-*`` headers, and a shared secret in ``X-Proxy-Secret``.
 
-The token travels in an HttpOnly cookie (browsers) or, when enabled, in an
-``Authorization: Bearer <token>`` header (scripts). Route enforcement itself
-happens in WebHandler; this module decides *who* a request belongs to
-(``resolve_user``) and handles login/logout/change-password.
+The secret is what makes the headers trustworthy. Anything on the proxy's
+network can call the app directly with whatever headers it likes, so with
+auth on every request without the right secret is refused (WebHandler calls
+``proxy_secret_ok`` before anything else), and the user headers are only read
+after that.
 
-Usernames are case-insensitive: they are lower-cased at every boundary so the
-three database backends behave the same.
+Roles come from the user's Authentik groups (``authentikRoles``). Requests
+that change something carry a form token bound to the user (``form_token``),
+so a page elsewhere can't send them in the user's name.
+
+Usernames are case-insensitive: they are lower-cased at every boundary.
 """
 
 import hashlib
 import hmac
-import json
 import os
-import secrets
-import threading
+import re
 import time
-from datetime import timedelta
-from http.cookies import SimpleCookie
-
-import jwt
-from dotenv import load_dotenv
 
 from WebServer import database as db
 from WebServer.helper import _send_json
 
 MIN_SECRET_LENGTH = 32
-PASSWORD_CHANGE_REQUIRED = "password_change_required"
+PROXY_SECRET_HEADER = "X-Proxy-Secret"
+FORM_TOKEN_HEADER = "X-CSRF-Token"
+AUTHENTIK_SIGN_OUT = "/outpost.goauthentik.io/sign_out"
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 _settings = {
-    "secret": None,
-    "lifetime": timedelta(days=1),
-    "remember_lifetime": timedelta(days=30),   # None = "remember me" disabled
-    "idle_timeout": None,                      # timedelta or None
-    "cookie_name": "hj_session",
-    "secure_cookie": False,
-    "bearer_tokens": True,
-    "max_login_attempts": 5,
-    "lockout_minutes": 15,
-    "min_password_length": 5,
+    "secret": None,              # JWT_SECRET: signs the form token
+    "proxy_secret": None,        # PROXY_SECRET: what the proxy sends in X-Proxy-Secret
     "audit": True,
     "trust_proxy": False,
-    "dummy_hash": None,   # used to equalise timing for unknown usernames
-    "login_title": "Access Restricted",
-    "login_message": "Please log in to continue.",
-    "login_logo": None,
     "role_hierarchy": None,      # list of roles, highest first, or None = exact role match
-    "audit_retention": None,     # timedelta or None = keep the audit log forever
+    "audit_retention": None,     # seconds or None = keep the audit log forever
+    "authentik_roles": {},       # {Authentik group name: role}
+    "dev_user": None,            # {"username", "name", "email", "groups"} in development mode
 }
-
-_TOUCH_INTERVAL = 60   # seconds between LastSeen writes for one session
-
-# Password checks run one at a time. Lockout counting reads LoginAttempts and
-# then writes it, so parallel attempts (threaded server) could otherwise all
-# pass the lockout check before any failure is counted, and race on
-# inserting the same LoginAttempts row.
-_login_lock = threading.Lock()
 
 
 def normalize_username(username):
@@ -70,63 +53,80 @@ def normalize_username(username):
 # Configuration
 # ---------------------------------------------------------------------------
 
-def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False, bearer_tokens=True,
-              max_login_attempts=5, lockout_minutes=15, min_password_length=5, audit=True,
-              trust_proxy=False, remember_me_days=30, idle_timeout_minutes=0,
-              login_title="Access Restricted", login_message="Please log in to continue.",
-              login_logo=None, role_hierarchy=None, audit_retention_days=None):
-    """Validate and store auth settings. Called from WebServer.settings(auth=True)."""
+def configure(host, audit=True, trust_proxy=False, role_hierarchy=None, audit_retention_days=None,
+              authentik_roles=None, dev_user=None):
+    """Validate and store auth settings. Called from WebServer.settings(auth=True).
+
+    Raises (so the app refuses to start) when a secret is missing, or when
+    devUser is set on a server that doesn't only listen on the local machine.
+    """
     if role_hierarchy is not None:
         role_hierarchy = [str(r) for r in role_hierarchy]
         if not role_hierarchy or len(set(role_hierarchy)) != len(role_hierarchy):
             raise ValueError("roleHierarchy must be a non-empty list of distinct roles, highest first.")
-    load_dotenv()
-    secret = jwt_secret or os.getenv("JWT_SECRET")
+    _settings["role_hierarchy"] = role_hierarchy
+
+    if authentik_roles is not None and not isinstance(authentik_roles, dict):
+        raise ValueError('authentikRoles must be a dict: {"<Authentik group>": "<role>"}.')
+    authentik_roles = {str(group): str(role) for group, role in (authentik_roles or {}).items()}
+    for role in authentik_roles.values():
+        check_role(role)
+
+    if dev_user is not None:
+        dev_user = _dev_user(dev_user, host)
+
+    secret = os.getenv("JWT_SECRET")
     if not secret or len(secret.encode("utf-8")) < MIN_SECRET_LENGTH:
         raise RuntimeError(
-            "JWT_SECRET is missing or shorter than 32 bytes. Set it in .env "
-            "(or pass jwtSecret= to settings()). Generate one with:\n"
+            "JWT_SECRET is missing or shorter than 32 bytes. Set it in .env. Generate one with:\n"
             "  python -c \"import secrets; print(secrets.token_hex(32))\""
         )
+    proxy_secret = os.getenv("PROXY_SECRET")
+    if dev_user is None and not (proxy_secret or "").strip():
+        # Only the name, never a value: this ends up in logs.
+        raise RuntimeError(
+            "PROXY_SECRET is missing or empty. Set it in .env; the proxy sends the same "
+            "value in the X-Proxy-Secret header."
+        )
+
     _settings.update(
         secret=secret,
-        lifetime=timedelta(hours=token_lifetime_hours),
-        remember_lifetime=timedelta(days=remember_me_days) if remember_me_days and remember_me_days > 0 else None,
-        idle_timeout=timedelta(minutes=idle_timeout_minutes) if idle_timeout_minutes and idle_timeout_minutes > 0 else None,
-        secure_cookie=bool(secure_cookie),
-        bearer_tokens=bool(bearer_tokens),
-        max_login_attempts=int(max_login_attempts),
-        lockout_minutes=float(lockout_minutes),
-        min_password_length=int(min_password_length),
+        proxy_secret=proxy_secret if dev_user is None else None,
         audit=bool(audit),
         trust_proxy=bool(trust_proxy),
-        dummy_hash=hash_password(secrets.token_hex(16)),
-        login_title=login_title,
-        login_message=login_message,
-        login_logo=login_logo,
-        role_hierarchy=role_hierarchy,
-        audit_retention=timedelta(days=audit_retention_days) if audit_retention_days else None,
+        audit_retention=audit_retention_days * 86400 if audit_retention_days else None,
+        authentik_roles=authentik_roles,
+        dev_user=dev_user,
     )
+
+
+def _dev_user(dev_user, host):
+    """Check devUser and return it in the shape request.user is built from."""
+    if str(host).strip().lower().strip("[]") not in LOCAL_HOSTS:
+        raise RuntimeError(
+            f"devUser is only allowed when the server listens on the local machine "
+            f"(host {', '.join(LOCAL_HOSTS)}), not {host!r}. Remove devUser, or use WebServer(port=...)."
+        )
+    if not isinstance(dev_user, dict) or not normalize_username(dev_user.get("username")):
+        raise ValueError('devUser must be a dict with at least a username: {"username": "test", "groups": [...]}.')
+    groups = dev_user.get("groups") or []
+    if isinstance(groups, str) or not isinstance(groups, (list, tuple)):
+        raise ValueError("devUser groups must be a list of Authentik group names.")
+    return {"username": normalize_username(dev_user["username"]),
+            "name": dev_user.get("name"), "email": dev_user.get("email"),
+            "groups": [str(g) for g in groups]}
 
 
 def attach_auth_routes(server):
     """Register the framework's auth routes on the server."""
-    server.routes.setdefault('POST', {})
     server.routes.setdefault('GET', {})
-
-    _register(server, 'GET', '/api/login-config', _login_config_route, public=True)
-    _register(server, 'POST', '/api/login', _login_route, public=True)
-    _register(server, 'POST', '/api/logout', _logout_route, public=True)
-    _register(server, 'GET', '/logout', _logout_redirect_route, public=True)
-    # These three stay reachable while a password change is pending.
-    _register(server, 'GET', '/api/verify', _verify_route, public=False, allow_pending=True)
-    _register(server, 'POST', '/api/change-password', _change_password_route, public=False, allow_pending=True)
-    _register(server, 'POST', '/api/logout-all', _logout_all_route, public=False, allow_pending=True)
+    _register(server, 'GET', '/logout', _logout_route, public=True)
+    _register(server, 'GET', '/api/verify', _verify_route, public=False)
 
 
 def on_server_start(routes):
-    """Checks and background work that only make sense in a running server
-    (not in the CLI, which also loads the app). Called from WebServer.start()."""
+    """Checks and messages that only make sense in a running server (not in
+    the CLI, which also loads the app). Called from WebServer.start()."""
     hierarchy = _settings["role_hierarchy"]
     if hierarchy:
         for method, table in routes.items():
@@ -135,21 +135,54 @@ def on_server_start(routes):
                 if unknown:
                     raise RuntimeError(f"{method} {path} requires role {', '.join(unknown)}, which is not in "
                                        f"roleHierarchy {hierarchy}. Fix the spelling or add the role.")
-        for record in db.get_all_users():
-            if (record.Role or "user") not in hierarchy:
-                print(f"[ auth ] warning: user {record.Username!r} has role {record.Role!r}, which is not in "
-                      f"roleHierarchy; it only matches routes that name that role exactly")
-    _housekeeping()
-    from WebServer import microsoft
-    microsoft.on_server_start()
-
-
-def _housekeeping():
-    """Expired sessions out; audit rows older than auditRetentionDays out."""
-    now = time.time()
-    db.delete_expired_sessions(now)
     if _settings["audit_retention"]:
-        db.delete_audit_before(now - _settings["audit_retention"].total_seconds())
+        db.delete_audit_before(time.time() - _settings["audit_retention"])
+
+    print('[ auth ] Offentlige stier — sæt dem ind i Authentik som "stier uden login":')
+    for pattern in public_path_patterns(routes):
+        print(pattern)
+
+    dev = _settings["dev_user"]
+    if dev:
+        print(f'[ auth ] UDVIKLINGSTILSTAND: alle er "{dev["username"]}" ({role_for_groups(dev["groups"])})')
+
+
+def public_path_patterns(routes):
+    """The public=True paths as anchored regular expressions, for Authentik's
+    unauthenticated paths: the app's own first, then the framework's (its
+    scripts and styles, which public pages load too, and /logout).
+
+    A framework file served at both /x and /public/x becomes one line,
+    ^(/public)?/x$.
+    """
+    public = {}
+    for table in routes.values():
+        for path, func in table.items():
+            if getattr(func, '_hj_public', False):
+                public.setdefault(path, func)
+
+    own, framework = [], []
+    for path, func in public.items():
+        if path.startswith('/public/') and public.get(path[len('/public'):]) is func:
+            continue   # folded into the line for path[len('/public'):]
+        prefix = "(/public)?" if public.get('/public' + path) is func else ""
+        pattern = f"^{prefix}{_regex_escape(path)}$"
+        (framework if getattr(func, '_hj_framework', False) else own).append(pattern)
+    return own + framework
+
+
+def _regex_escape(path):
+    # re.escape also escapes characters like "-" and "/", which is harmless in
+    # Python but noisy to paste; only the ones that mean something in a regex.
+    return re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", path)
+
+
+def _register(server, method, path, func, public):
+    if path in server.routes[method]:
+        return
+    func._hj_public = public
+    func._hj_framework = True
+    server.routes[method][path] = func
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +213,7 @@ def describe_roles(roles):
 
 
 def lowest_role():
-    """The role a brand-new user gets."""
+    """The role of a user in none of the authentikRoles groups."""
     hierarchy = _settings["role_hierarchy"]
     return hierarchy[-1] if hierarchy else "user"
 
@@ -192,130 +225,99 @@ def check_role(role):
         raise ValueError(f"Unknown role '{role}'. roleHierarchy allows: {', '.join(hierarchy)}")
 
 
-def _register(server, method, path, func, public, allow_pending=False):
-    if path in server.routes[method]:
-        return
-    func._hj_public = public
-    func._hj_allow_pending_password = allow_pending
-    server.routes[method][path] = func
+def role_for_groups(groups):
+    """The role for a user in these Authentik groups, by authentikRoles.
 
-
-# ---------------------------------------------------------------------------
-# Passwords
-# ---------------------------------------------------------------------------
-
-_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2 ** 14, 8, 1
-
-
-def hash_password(password):
-    """Return a salted scrypt hash in the form ``scrypt$<salt hex>$<hash hex>``."""
-    salt = os.urandom(16)
-    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
-    return f"scrypt${salt.hex()}${digest.hex()}"
-
-
-def verify_password(password, stored):
-    """Check ``password`` against a stored hash. Returns False for empty/NULL hashes."""
-    if not stored or password is None:
-        return False
-    if stored.startswith("scrypt$"):
-        try:
-            _, salt_hex, digest_hex = stored.split("$", 2)
-            digest = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt_hex),
-                                    n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
-            return hmac.compare_digest(digest.hex(), digest_hex)
-        except (ValueError, TypeError):
-            return False
-    # Legacy row: password stored in plaintext by an older version of this
-    # framework. Accept it once so the login route can upgrade it to a hash.
-    return hmac.compare_digest(password, stored)
-
-
-def needs_rehash(stored):
-    return bool(stored) and not stored.startswith("scrypt$")
-
-
-def check_password_policy(password):
-    """Raise ValueError if the password does not meet the configured policy."""
-    if not password:
-        raise ValueError("Password is required.")
-    if len(password) < _settings["min_password_length"]:
-        raise ValueError(f"Password must be at least {_settings['min_password_length']} characters.")
-
-
-# ---------------------------------------------------------------------------
-# Lockout (stored in the LoginAttempts table so it survives restarts and is
-# visible to the CLI)
-# ---------------------------------------------------------------------------
-
-def _lockout_keys(username, ip):
-    return [f"user:{username}", f"ip:{ip}"]
-
-
-def _lockout_remaining(username, ip):
-    """Seconds left on the lockout for this username/IP, or 0."""
-    now = time.time()
-    remaining = 0
-    for key in _lockout_keys(username, ip):
-        entry = db.get_login_attempt(key)
-        if entry and entry.LockedUntil > now:
-            remaining = max(remaining, entry.LockedUntil - now)
-    return int(remaining) + (1 if remaining else 0)
-
-
-def _record_failure(username, ip):
-    now = time.time()
-    window = _settings["lockout_minutes"] * 60
-    for key in _lockout_keys(username, ip):
-        entry = db.get_login_attempt(key)
-        count = entry.FailCount if entry and now - entry.LastAt <= window else 0
-        count += 1
-        until = now + window if count >= _settings["max_login_attempts"] else 0
-        db.save_login_attempt(key, count, now, until, username)
-    db.delete_stale_login_attempts(now - window * 2)
-
-
-def _clear_failures(username, ip):
-    for key in _lockout_keys(username, ip):
-        db.delete_login_attempt(key)
-
-
-def unlock(username=None, ip=None):
-    """Clear the failed-login counter and lockout for a username and/or IP.
-
-    With no arguments, clears every lockout. Returns the number of entries removed.
+    With roleHierarchy the highest of the matching roles; without it the first
+    match in the order authentikRoles lists the groups. No match: lowest_role().
     """
-    if username is None and ip is None:
-        count = len(db.fetch_all("SELECT AttemptKey FROM LoginAttempts"))
-        db.delete_all_login_attempts()
-        return count
-    removed = 0
-    if username is not None:
-        username = normalize_username(username)
-        if db.get_login_attempt(f"user:{username}"):
-            db.delete_login_attempt(f"user:{username}")
-            removed += 1
-        # Also lift IP lockouts caused by this user's own attempts, so the
-        # person on the phone can log in straight away.
-        ip_rows = [r for r in db.fetch_all("SELECT AttemptKey FROM LoginAttempts WHERE LastUser = ? AND AttemptKey LIKE 'ip:%'", (username,))]
-        db.delete_login_attempts_by_user(username)
-        removed += len(ip_rows)
-    if ip is not None:
-        if db.get_login_attempt(f"ip:{ip}"):
-            db.delete_login_attempt(f"ip:{ip}")
-            removed += 1
-    return removed
+    mapping = _settings["authentik_roles"]
+    groups = set(groups)
+    matches = [role for group, role in mapping.items() if group in groups]
+    if not matches:
+        return lowest_role()
+    hierarchy = _settings["role_hierarchy"]
+    if hierarchy:
+        return min(matches, key=hierarchy.index)
+    return matches[0]
 
 
-def get_lockouts():
-    """Currently locked-out usernames and IPs with seconds remaining."""
-    now = time.time()
-    result = []
-    for entry in db.get_locked_attempts(now):
-        kind, _, value = entry.AttemptKey.partition(":")
-        result.append({"type": "username" if kind == "user" else "ip", "value": value,
-                       "failures": entry.FailCount, "remaining": int(entry.LockedUntil - now) + 1})
-    return result
+# ---------------------------------------------------------------------------
+# Proxy secret and Authentik's headers
+# ---------------------------------------------------------------------------
+
+def proxy_secret_ok(request):
+    """True when the request carries the proxy's secret (always in development mode).
+
+    Compared in constant time. The header is then removed from the request,
+    so nothing later (a handler printing its headers) can echo it.
+    """
+    if _settings["dev_user"]:
+        return True
+    expected = _settings["proxy_secret"]
+    sent = request.headers.get(PROXY_SECRET_HEADER)
+    if not expected or sent is None:
+        return False
+    # http.server decodes headers as latin-1, so that gives back the bytes that were sent.
+    ok = hmac.compare_digest(sent.encode("latin-1", "replace"), expected.encode("utf-8"))
+    if ok:
+        del request.headers[PROXY_SECRET_HEADER]
+    return ok
+
+
+def _header(request, name):
+    """A header as text. http.server decodes headers as latin-1, but Authentik
+    sends names like "Søren" as UTF-8, so they are decoded again."""
+    value = request.headers.get(name)
+    if value is None:
+        return None
+    try:
+        return value.encode("latin-1").decode("utf-8").strip()
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value.strip()
+
+
+def _user(username, name, email, groups):
+    return {"username": username, "name": name or username, "email": email or "",
+            "role": role_for_groups(groups), "groups": list(groups)}
+
+
+def resolve_user(request):
+    """The user dict for a request, from Authentik's headers, else None. Never writes a response.
+
+    Only call it once proxy_secret_ok() has passed: before that the headers
+    can say anything. In development mode it is always the devUser.
+    """
+    dev = _settings["dev_user"]
+    if dev:
+        return _user(dev["username"], dev["name"], dev["email"], dev["groups"])
+    username = normalize_username(_header(request, "X-authentik-username"))
+    if not username:
+        return None
+    groups = [g.strip() for g in (_header(request, "X-authentik-groups") or "").split("|") if g.strip()]
+    return _user(username, _header(request, "X-authentik-name"), _header(request, "X-authentik-email"), groups)
+
+
+# Backwards-compatible name used by WebServer.checkAuth.
+check_auth = resolve_user
+
+
+# ---------------------------------------------------------------------------
+# Form token
+# ---------------------------------------------------------------------------
+
+def form_token(username):
+    """HMAC of the username with JWT_SECRET. auth.js sends it in X-CSRF-Token
+    on every POST, PUT and DELETE; a page on another site can't know it."""
+    return hmac.new(_settings["secret"].encode("utf-8"), normalize_username(username).encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def form_token_ok(request, user):
+    sent = request.headers.get(FORM_TOKEN_HEADER)
+    if not sent or not user:
+        return False
+    return hmac.compare_digest(sent.encode("latin-1", "replace"), form_token(user["username"]).encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -346,338 +348,21 @@ def audit(event, username=None, detail=None, request=None):
 
 
 # ---------------------------------------------------------------------------
-# Tokens / sessions
-# ---------------------------------------------------------------------------
-
-def create_token_for_user(username, remember=False, lifetime=None):
-    """Mint a token and register its session row. Returns (token, lifetime_seconds).
-
-    lifetime (a timedelta) overrides tokenLifetimeHours/rememberMeDays, e.g.
-    microsoftSessionHours for Microsoft logins.
-    """
-    username = normalize_username(username)
-    if lifetime is None:
-        lifetime = _settings["lifetime"]
-        if remember and _settings["remember_lifetime"]:
-            lifetime = _settings["remember_lifetime"]
-    now = int(time.time())
-    expires = now + int(lifetime.total_seconds())
-    jti = secrets.token_hex(16)
-    db.create_session(jti, username, now, expires)
-    payload = {"username": username, "jti": jti, "iat": now, "exp": expires}
-    return jwt.encode(payload, _settings["secret"], algorithm="HS256"), int(lifetime.total_seconds())
-
-
-def _decode(token, verify_exp=True):
-    try:
-        return jwt.decode(token, _settings["secret"], algorithms=["HS256"], options={"verify_exp": verify_exp})
-    except jwt.InvalidTokenError:
-        return None
-
-
-def revoke_token(token):
-    """Delete the session behind a token (ignores invalid tokens)."""
-    payload = _decode(token, verify_exp=False)
-    if payload and payload.get("jti"):
-        db.delete_session(payload["jti"])
-
-
-def revoke_sessions(username):
-    db.delete_sessions_for_user(normalize_username(username))
-
-
-def _token_from_request(request):
-    if _settings["bearer_tokens"]:
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith("Bearer "):
-            return auth_header.split(" ", 1)[1].strip()
-
-    cookie_header = request.headers.get('Cookie')
-    if cookie_header:
-        cookies = SimpleCookie()
-        try:
-            cookies.load(cookie_header)
-        except Exception:
-            return None
-        morsel = cookies.get(_settings["cookie_name"])
-        if morsel:
-            return morsel.value
-    return None
-
-
-def is_microsoft_user(record):
-    """A Microsoft account: linked (ExternalId set) or created with --sso (no password)."""
-    return bool(getattr(record, "ExternalId", None)) or not record.PasswordHash
-
-
-def _user_dict(record):
-    return {
-        "username": record.Username,
-        "role": record.Role or "user",
-        "mustChangePassword": bool(record.MustChangePassword),
-        "source": "microsoft" if is_microsoft_user(record) else "local",
-        "displayName": getattr(record, "DisplayName", None) or record.Username,
-    }
-
-
-def resolve_user(request):
-    """Return the user dict for an authenticated request, else None. Never writes a response.
-
-    Checks: signature + expiry, session row exists, user exists and is not
-    disabled, idle timeout. Stores the session id on ``request._hj_jti``.
-    """
-    token = _token_from_request(request)
-    if not token:
-        return None
-    payload = _decode(token)
-    if not payload or not payload.get("jti"):
-        return None
-
-    now = time.time()
-    session = db.get_session(payload["jti"])
-    if session is None or session.Username != payload.get("username") or session.ExpiresAt < now:
-        return None
-
-    idle = _settings["idle_timeout"]
-    if idle and session.LastSeen and now - session.LastSeen > idle.total_seconds():
-        db.delete_session(session.Jti)
-        audit("session_idle_expired", session.Username, None, request)
-        return None
-
-    record = db.get_user_by_username(session.Username)
-    if record is None or record.Disabled:
-        return None
-
-    if now - (session.LastSeen or 0) > _TOUCH_INTERVAL:
-        db.touch_session(session.Jti, now)
-
-    request._hj_jti = session.Jti
-    return _user_dict(record)
-
-
-# Backwards-compatible name used by WebServer.checkAuth.
-check_auth = resolve_user
-
-
-def _session_cookie(token=None, max_age=None):
-    """Build the Set-Cookie header value. ``token=None`` produces a clearing cookie."""
-    parts = [f"{_settings['cookie_name']}={token or ''}", "Path=/", "HttpOnly", "SameSite=Strict"]
-    parts.append(f"Max-Age={int(max_age) if token else 0}")
-    if _settings["secure_cookie"]:
-        parts.append("Secure")
-    return "; ".join(parts)
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
-def _json_body(request):
-    body = getattr(request, 'body', None)
-    if body is None:
-        content_length = int(request.headers.get('Content-Length', 0))
-        try:
-            body = json.loads(request.rfile.read(content_length).decode('utf-8'))
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            return None
-    return body if isinstance(body, dict) else None
-
-
-def _login_config_route(request):
-    from WebServer import microsoft
-    _send_json(request, 200, {
-        "title": _settings["login_title"],
-        "message": _settings["login_message"],
-        "logo": _settings["login_logo"],
-        "rememberMe": _settings["remember_lifetime"] is not None,
-        "minPasswordLength": _settings["min_password_length"],
-        # Only whether the username-first form is on - which name goes where is
-        # decided by POST /api/login/start, so the rules stay on the server.
-        "ssoEnabled": microsoft.enabled(),
-        "ssoOnly": microsoft.sso_only(),
-    })
-
-
-def _login_route(request):
-    credentials = _json_body(request)
-    if credentials is None:
-        _send_json(request, 400, {"error": "Invalid JSON payload."})
-        return
-
-    username = credentials.get("username")
-    password = credentials.get("password")
-    if not username or password is None:
-        _send_json(request, 400, {"error": "Username and password are required."})
-        return
-
-    username = normalize_username(username)
-    password = str(password)
-    remember = bool(credentials.get("rememberMe"))
-    ip = client_ip(request) or "?"
-
-    from WebServer import microsoft
-    if not microsoft.password_login_allowed(username):
-        # ssoOnly: decided from settings alone, before any lookup, so it says
-        # nothing about which accounts exist.
-        audit("login_failed", username, "ssoOnly: not in localAccounts", request)
-        _send_json(request, 403, {"error": microsoft.SSO_ONLY_MESSAGE})
-        return
-
-    # Only the lockout bookkeeping and the password check hold the lock;
-    # responses are sent after it is released, so a slow client can't keep it.
-    with _login_lock:
-        remaining = _lockout_remaining(username, ip)
-        user_record = None
-        ok = False
-        if not remaining:
-            user_record = db.get_user_by_username(username)
-            if user_record is None:
-                # Spend the same time as a real check so timing can't reveal which usernames exist.
-                verify_password(password, _settings["dummy_hash"])
-            else:
-                ok = verify_password(password, user_record.PasswordHash)
-            if not ok:
-                _record_failure(username, ip)
-            elif not user_record.Disabled:
-                _clear_failures(username, ip)
-
-    if remaining:
-        audit("login_locked", username, f"retry in {remaining}s", request)
-        _send_json(request, 429, {"error": f"Too many failed attempts. Try again in {remaining} seconds."},
-                   headers={"Retry-After": str(remaining)})
-        return
-
-    if not ok:
-        audit("login_failed", username, None, request)
-        _send_json(request, 401, {"error": "Invalid username or password."})
-        return
-
-    if user_record.Disabled:
-        audit("login_disabled", username, None, request)
-        _send_json(request, 403, {"error": "This account is disabled."})
-        return
-
-    if needs_rehash(user_record.PasswordHash):
-        db.update_user_password(username, hash_password(password), bool(user_record.MustChangePassword))
-        audit("password_rehashed", username, "legacy plaintext upgraded", request)
-
-    _housekeeping()
-    token, max_age = create_token_for_user(username, remember=remember)
-    audit("login_ok", username, "remember me" if remember else None, request)
-    _send_json(
-        request, 200,
-        {"valid": True, "message": "Login successful", "token": token, "user": _user_dict(user_record)},
-        headers={"Set-Cookie": _session_cookie(token, max_age)},
-    )
-
-
-def _end_session(request):
-    """Revoke this request's session. Returns (username, Microsoft sign-out URL or None)."""
-    from WebServer import microsoft
-    token = _token_from_request(request)
-    user = None
-    if token:
-        user = resolve_user(request)
-        revoke_token(token)
-    return (user["username"] if user else None), microsoft.logout_url(request, user)
-
-
 def _logout_route(request):
-    username, ms_logout = _end_session(request)
-    audit("logout", username, None, request)
-    payload = {"valid": False, "message": "Logged out"}
-    if ms_logout:
-        payload["redirect"] = ms_logout   # auth.js goes there to sign out at Microsoft too
-    _send_json(request, 200, payload, headers={"Set-Cookie": _session_cookie(None)})
-
-
-def _logout_redirect_route(request):
-    """GET /logout - same revocation as POST /api/logout, but for typing the
-    URL directly into a browser: redirects to / instead of returning JSON,
-    so you land back on the login screen (handy for testing as multiple users).
-    """
-    username, ms_logout = _end_session(request)
-    audit("logout", username, None, request)
+    """GET /logout - to Authentik's sign-out, which ends the login for every app behind it."""
+    user = resolve_user(request)
+    audit("logout", user["username"] if user else None, None, request)
     request.send_response(302)
-    request.send_header('Location', ms_logout or '/')
-    request.send_header('Set-Cookie', _session_cookie(None))
+    request.send_header('Location', AUTHENTIK_SIGN_OUT)
+    request.send_header('Cache-Control', 'no-store')
     request.end_headers()
-
-
-def _logout_all_route(request):
-    from WebServer import microsoft
-    revoke_sessions(request.user["username"])
-    audit("logout_all", request.user["username"], None, request)
-    payload = {"valid": False, "message": "Logged out everywhere"}
-    ms_logout = microsoft.logout_url(request, request.user)
-    if ms_logout:
-        payload["redirect"] = ms_logout
-    _send_json(request, 200, payload, headers={"Set-Cookie": _session_cookie(None)})
 
 
 def _verify_route(request):
     # WebHandler already enforced authentication and populated request.user.
     # roleHierarchy lets pages ask hjAuth.hasRole() with the same rule as the server.
-    _send_json(request, 200, {"valid": True, "user": request.user, "roleHierarchy": _settings["role_hierarchy"]})
-
-
-def _change_password_route(request):
-    body = _json_body(request)
-    if body is None:
-        _send_json(request, 400, {"error": "Invalid JSON payload."})
-        return
-    current = body.get("currentPassword")
-    new = body.get("newPassword")
-    if current is None or new is None:
-        _send_json(request, 400, {"error": "currentPassword and newPassword are required."})
-        return
-
-    username = request.user["username"]
-    record = db.get_user_by_username(username)
-    if record is not None and is_microsoft_user(record):
-        _send_json(request, 400, {"error": "Microsoft accounts change their password at Microsoft."})
-        return
-    if record is None or not verify_password(str(current), record.PasswordHash):
-        audit("password_change_failed", username, "wrong current password", request)
-        _send_json(request, 401, {"error": "Current password is incorrect."})
-        return
-    try:
-        check_password_policy(str(new))
-    except ValueError as e:
-        _send_json(request, 400, {"error": str(e)})
-        return
-    if str(new) == str(current):
-        _send_json(request, 400, {"error": "New password must be different from the current one."})
-        return
-
-    db.update_user_password(username, hash_password(str(new)), must_change_password=False)
-    # Keep this session, drop every other one (a stolen session dies here).
-    keep = getattr(request, '_hj_jti', None)
-    if keep:
-        db.delete_other_sessions(username, keep)
-    else:
-        db.delete_sessions_for_user(username)
-    audit("password_changed", username, "by user", request)
-    _send_json(request, 200, {"valid": True, "message": "Password changed"})
-
-
-# ---------------------------------------------------------------------------
-# Login shell
-# ---------------------------------------------------------------------------
-
-_LOGIN_SHELL = b"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign in</title>
-</head>
-<body>
-</body>
-</html>"""
-
-
-def login_shell_html(inject_urls):
-    """Minimal page that only carries the framework scripts, so auth.js can render the login form."""
-    from WebServer.WebHandler import inject_js_scripts
-    return inject_js_scripts(_LOGIN_SHELL, inject_urls)
+    _send_json(request, 200, {"valid": True, "user": request.user, "roleHierarchy": _settings["role_hierarchy"],
+                              "csrfToken": form_token(request.user["username"])})

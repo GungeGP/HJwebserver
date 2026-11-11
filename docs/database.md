@@ -34,7 +34,9 @@ AuditLog         (Id, At, Username, Event, Detail, Ip)
 tableviewLedger  (Id, At, Username, ChangeType, TableName, RowKey, OldValues, NewValues, Reason)
 ```
 
-The first four are used by the login system; `tableviewLedger` records every change
+`AuditLog` holds security events (see [auth.md](auth.md#audit-log)). `Users`, `Sessions` and
+`LoginAttempts` are from the app's own login, from before it moved behind Authentik; they are
+still created and kept, but nothing uses them. `tableviewLedger` records every change
 made through a table viewer (see [tableviewer.md](tableviewer.md#tableviewledger-what-exactly-changed)). Tables are created only if
 missing; columns added by newer versions (`Role`, `Disabled`, ... ) are added to
 existing tables with `ALTER TABLE ... ADD`, so a database from an older version
@@ -121,5 +123,5 @@ Used by the framework itself, but you can call them:
 | Function | Purpose |
 |----------|---------|
 | `get_user_by_username(username)` | row with `Username`, `PasswordHash`, or `None` |
-| `create_user(username, password_hash)` | inserts a user. Prefer `app.createUser`, which hashes the password for you |
-| `update_user_password(username, password_hash)` | prefer `app.setPassword` |
+| `create_user(username, password_hash)` | inserts a row in `Users` (no longer used for login) |
+| `update_user_password(username, password_hash)` | updates a row in `Users` (no longer used for login) |

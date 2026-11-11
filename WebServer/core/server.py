@@ -10,6 +10,8 @@ import ssl
 import sys
 import threading
 
+from dotenv import load_dotenv
+
 from WebServer.WebHandler import REQUEST_TIMEOUT, WebHandler
 from WebServer.database import createConnection, get_connection, create_tables
 
@@ -70,6 +72,8 @@ class ServerMixin:
     """Construction, routing, TLS, database wiring, and serve_forever()."""
 
     def __init__(self, host="127.0.0.1", port=8000, static_dir: str = None, threaded=True):
+        # .env first, so main.py can read its own keys with os.environ before settings().
+        load_dotenv()
         self.host = host
         self.port = port
         self.threaded = bool(threaded)
@@ -190,7 +194,7 @@ class ServerMixin:
     def useHttps(self, certfile, keyfile):
         """Serve over TLS using a PEM certificate and private key.
 
-        Also turns on the Secure cookie flag and HSTS. For a local self-signed pair:
+        Also turns on HSTS. For a local self-signed pair:
           openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"
         """
         for path in (certfile, keyfile):
@@ -198,9 +202,6 @@ class ServerMixin:
                 raise FileNotFoundError(f"useHttps: file not found: {path}")
         self.certfile = certfile
         self.keyfile = keyfile
-        if self.auth:
-            from WebServer.auth import _settings
-            _settings["secure_cookie"] = True
 
     def setDatabase(self, type="mssql", server="localhost", dbName="test", user=None, password=None, port=None, createTables=True):
         """Configure the database backend.
@@ -226,7 +227,7 @@ class ServerMixin:
         self._register_asset_alias_routes()
         if self.auth:
             from WebServer.auth import on_server_start
-            on_server_start(self.routes)   # role checks, cleanup, Microsoft account checks
+            on_server_start(self.routes)   # role checks, audit cleanup, public paths for Authentik
         context = None
         if self.certfile:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -247,7 +248,6 @@ class ServerMixin:
         server.can_serve_static_js = self.can_serve_static_js
         server.get_inject_js_urls = self.get_inject_js_urls
         server.resolve_user = self._resolve_user
-        server.login_shell_html = self._login_shell_html
         server.security_headers = self._security_headers
         server.max_body_bytes = self.max_body_bytes
 

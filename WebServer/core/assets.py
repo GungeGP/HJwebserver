@@ -69,6 +69,7 @@ class AssetsMixin:
             request.end_headers()
             request.wfile.write(content)
 
+        serve._hj_framework = True   # listed after the app's own public paths at start (see WebServer.auth)
         return serve
 
     def _asset_version(self, relative_file_name):

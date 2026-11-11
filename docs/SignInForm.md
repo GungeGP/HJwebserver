@@ -1,9 +1,16 @@
 # Sign-in form — Microsoft login + local accounts
 
-**Status: implemented** in `WebServer/microsoft.py` (sign-in, Graph, linking,
-account check), `WebServer/auth.py` (roles, ssoOnly, logout) and
-`public/js/auth.js` (the form). Where the code differs from the original
-design, this document has been updated to match it.
+> **Status: not in use.** This plan has been replaced by login via Authentik in
+> front of the app — see [Authentication](auth.md). Microsoft login inside the
+> app, the username-first form and local password accounts have been removed
+> from the framework. The code described below is in commit `620f265`. The
+> ranked roles (`roleHierarchy`) are still in use, now with roles from
+> Authentik's groups.
+
+**Status before it was replaced: implemented** in `WebServer/microsoft.py`
+(sign-in, Graph, linking, account check), `WebServer/auth.py` (roles, ssoOnly,
+logout) and `public/js/auth.js` (the form). Where the code differed from the
+original design, this document was updated to match it.
 
 HJwebserver is a framework, so everything here is **opt-in per app**. An app that
 only calls `settings(auth=True)` keeps today's username + password form and

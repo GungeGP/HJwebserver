@@ -35,32 +35,14 @@ That's the whole setup. The script and styles are loaded automatically once
 Fields you don't touch aren't sent when saving, so a `datetime2(7)` value
 keeps its full precision unless you actually change it.
 
-## Showing the table behind the login
+## When the data route answers "not logged in"
 
-When the data route answers "not logged in", TableViewer keeps its placeholder
-rows instead of showing an error. On a protected page that happens by itself:
-logged out, the page is shown with the login form on top of a ghost table.
-
-```python
-app.addPath('/', 'public/index.html')                 # the page: shown behind the login
-app.addTableViewer('/api/daily', table="Employees")   # the data: requires login
-```
-
-Anyone can read the page's HTML this way, just never its rows (see
-[auth.md](auth.md#what-a-logged-out-visitor-sees)). On a `public=True` page the
-login form never appears, so the placeholder rows simply stay.
-
-Because the page is shown, your own CSS applies on the login screen too, for
-example a see-through overlay instead of the default dark one:
-
-```html
-<style>
-  html #login-overlay { background-color: rgba(255, 255, 255, 0.35); backdrop-filter: none; }
-</style>
-```
-
-(`html #login-overlay` rather than `#login-overlay`, so it wins over the
-framework's `auth.css` no matter which loads first.)
+When the data route answers `401`, TableViewer keeps its placeholder rows
+instead of showing an error. Behind Authentik that is rare: the page itself
+is only sent to someone who is logged in. When it does happen, `auth.js`
+reloads the page so Authentik can show its login (see
+[auth.md](auth.md#what-auth-on-means)). On a `public=True` page nothing is
+reloaded, so the placeholder rows simply stay.
 
 ## Choosing columns
 
