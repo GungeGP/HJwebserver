@@ -224,6 +224,9 @@ class ServerMixin:
     def start(self):
         """Boots the server."""
         self._register_asset_alias_routes()
+        if self.auth:
+            from WebServer.auth import on_server_start
+            on_server_start(self.routes)   # role checks, cleanup, Microsoft account checks
         context = None
         if self.certfile:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

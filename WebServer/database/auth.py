@@ -7,11 +7,15 @@ not hashing, tokens, or HTTP.
 
 from WebServer.database.core import execute, fetch_all, fetch_one, get_database_type
 
-_USER_COLUMNS = "Username, PasswordHash, Role, Disabled, MustChangePassword"
+_USER_COLUMNS = "Username, PasswordHash, Role, Disabled, MustChangePassword, ExternalId, DisplayName, Email, RolePinned"
 
 
 def get_user_by_username(username):
     return fetch_one(f"SELECT {_USER_COLUMNS} FROM Users WHERE Username = ?", (username,))
+
+
+def get_user_by_external_id(external_id):
+    return fetch_one(f"SELECT {_USER_COLUMNS} FROM Users WHERE ExternalId = ?", (external_id,))
 
 
 def get_all_users():
@@ -42,6 +46,34 @@ def set_user_disabled(username, disabled):
 
 def delete_user(username):
     execute("DELETE FROM Users WHERE Username = ?", (username,))
+
+
+# --- Microsoft accounts ---------------------------------------------------
+
+def create_sso_user(username, role="user", external_id=None, display_name=None, email=None):
+    """A user without a password. external_id=None: created ahead of their
+    first Microsoft login (createuser --sso), linked when it happens."""
+    execute("""
+    INSERT INTO Users (Username, PasswordHash, Role, Disabled, MustChangePassword, ExternalId, DisplayName, Email, RolePinned)
+    VALUES (?, NULL, ?, 0, 0, ?, ?, ?, 0)
+    """, (username, role, external_id, display_name, email))
+
+
+def set_sso_profile(username, external_id, display_name, email):
+    execute("UPDATE Users SET ExternalId = ?, DisplayName = ?, Email = ? WHERE Username = ?",
+            (external_id, display_name, email, username))
+
+
+def set_role_pinned(username, pinned):
+    execute("UPDATE Users SET RolePinned = ? WHERE Username = ?", (1 if pinned else 0, username))
+
+
+def get_sso_users_with_sessions(now):
+    """Microsoft users that currently have at least one live session."""
+    return fetch_all("""
+    SELECT DISTINCT u.Username, u.ExternalId FROM Users u JOIN Sessions s ON s.Username = u.Username
+    WHERE u.ExternalId IS NOT NULL AND s.ExpiresAt >= ?
+    """, (int(now),))
 
 
 # --- Sessions -------------------------------------------------------------
@@ -120,6 +152,10 @@ def delete_stale_login_attempts(before):
 def insert_audit(at, username, event, detail, ip):
     execute("INSERT INTO AuditLog (At, Username, Event, Detail, Ip) VALUES (?, ?, ?, ?, ?)",
             (int(at), username, event, detail, ip))
+
+
+def delete_audit_before(before):
+    execute("DELETE FROM AuditLog WHERE At < ?", (int(before),))
 
 
 def get_audit_log(limit=100, username=None):

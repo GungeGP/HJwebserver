@@ -49,6 +49,8 @@ _settings = {
     "login_title": "Access Restricted",
     "login_message": "Please log in to continue.",
     "login_logo": None,
+    "role_hierarchy": None,      # list of roles, highest first, or None = exact role match
+    "audit_retention": None,     # timedelta or None = keep the audit log forever
 }
 
 _TOUCH_INTERVAL = 60   # seconds between LastSeen writes for one session
@@ -72,8 +74,12 @@ def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False, bea
               max_login_attempts=5, lockout_minutes=15, min_password_length=5, audit=True,
               trust_proxy=False, remember_me_days=30, idle_timeout_minutes=0,
               login_title="Access Restricted", login_message="Please log in to continue.",
-              login_logo=None):
+              login_logo=None, role_hierarchy=None, audit_retention_days=None):
     """Validate and store auth settings. Called from WebServer.settings(auth=True)."""
+    if role_hierarchy is not None:
+        role_hierarchy = [str(r) for r in role_hierarchy]
+        if not role_hierarchy or len(set(role_hierarchy)) != len(role_hierarchy):
+            raise ValueError("roleHierarchy must be a non-empty list of distinct roles, highest first.")
     load_dotenv()
     secret = jwt_secret or os.getenv("JWT_SECRET")
     if not secret or len(secret.encode("utf-8")) < MIN_SECRET_LENGTH:
@@ -98,6 +104,8 @@ def configure(jwt_secret=None, token_lifetime_hours=24, secure_cookie=False, bea
         login_title=login_title,
         login_message=login_message,
         login_logo=login_logo,
+        role_hierarchy=role_hierarchy,
+        audit_retention=timedelta(days=audit_retention_days) if audit_retention_days else None,
     )
 
 
@@ -114,6 +122,74 @@ def attach_auth_routes(server):
     _register(server, 'GET', '/api/verify', _verify_route, public=False, allow_pending=True)
     _register(server, 'POST', '/api/change-password', _change_password_route, public=False, allow_pending=True)
     _register(server, 'POST', '/api/logout-all', _logout_all_route, public=False, allow_pending=True)
+
+
+def on_server_start(routes):
+    """Checks and background work that only make sense in a running server
+    (not in the CLI, which also loads the app). Called from WebServer.start()."""
+    hierarchy = _settings["role_hierarchy"]
+    if hierarchy:
+        for method, table in routes.items():
+            for path, func in table.items():
+                unknown = [r for r in (getattr(func, '_hj_roles', None) or []) if r not in hierarchy]
+                if unknown:
+                    raise RuntimeError(f"{method} {path} requires role {', '.join(unknown)}, which is not in "
+                                       f"roleHierarchy {hierarchy}. Fix the spelling or add the role.")
+        for record in db.get_all_users():
+            if (record.Role or "user") not in hierarchy:
+                print(f"[ auth ] warning: user {record.Username!r} has role {record.Role!r}, which is not in "
+                      f"roleHierarchy; it only matches routes that name that role exactly")
+    _housekeeping()
+    from WebServer import microsoft
+    microsoft.on_server_start()
+
+
+def _housekeeping():
+    """Expired sessions out; audit rows older than auditRetentionDays out."""
+    now = time.time()
+    db.delete_expired_sessions(now)
+    if _settings["audit_retention"]:
+        db.delete_audit_before(now - _settings["audit_retention"].total_seconds())
+
+
+# ---------------------------------------------------------------------------
+# Roles
+# ---------------------------------------------------------------------------
+
+def has_role(user_role, required):
+    """True when ``user_role`` satisfies ``required`` (a list of roles).
+
+    Without roleHierarchy the role must be one of them exactly. With one,
+    "this role or higher" counts too: admin satisfies ["role1"].
+    """
+    if not required:
+        return True
+    if user_role in required:
+        return True
+    hierarchy = _settings["role_hierarchy"]
+    if not hierarchy or user_role not in hierarchy:
+        return False
+    rank = hierarchy.index(user_role)
+    return any(r in hierarchy and rank <= hierarchy.index(r) for r in required)
+
+
+def describe_roles(roles):
+    """"admin or role1", plus " or higher" when roles are ranked - for 403 messages and the audit log."""
+    text = " or ".join(roles)
+    return text + " or higher" if _settings["role_hierarchy"] else text
+
+
+def lowest_role():
+    """The role a brand-new user gets."""
+    hierarchy = _settings["role_hierarchy"]
+    return hierarchy[-1] if hierarchy else "user"
+
+
+def check_role(role):
+    """Raise ValueError for a role that isn't in roleHierarchy (catches typos like "admn")."""
+    hierarchy = _settings["role_hierarchy"]
+    if hierarchy and role not in hierarchy:
+        raise ValueError(f"Unknown role '{role}'. roleHierarchy allows: {', '.join(hierarchy)}")
 
 
 def _register(server, method, path, func, public, allow_pending=False):
@@ -273,12 +349,17 @@ def audit(event, username=None, detail=None, request=None):
 # Tokens / sessions
 # ---------------------------------------------------------------------------
 
-def create_token_for_user(username, remember=False):
-    """Mint a token and register its session row. Returns (token, lifetime_seconds)."""
+def create_token_for_user(username, remember=False, lifetime=None):
+    """Mint a token and register its session row. Returns (token, lifetime_seconds).
+
+    lifetime (a timedelta) overrides tokenLifetimeHours/rememberMeDays, e.g.
+    microsoftSessionHours for Microsoft logins.
+    """
     username = normalize_username(username)
-    lifetime = _settings["lifetime"]
-    if remember and _settings["remember_lifetime"]:
-        lifetime = _settings["remember_lifetime"]
+    if lifetime is None:
+        lifetime = _settings["lifetime"]
+        if remember and _settings["remember_lifetime"]:
+            lifetime = _settings["remember_lifetime"]
     now = int(time.time())
     expires = now + int(lifetime.total_seconds())
     jti = secrets.token_hex(16)
@@ -324,11 +405,18 @@ def _token_from_request(request):
     return None
 
 
+def is_microsoft_user(record):
+    """A Microsoft account: linked (ExternalId set) or created with --sso (no password)."""
+    return bool(getattr(record, "ExternalId", None)) or not record.PasswordHash
+
+
 def _user_dict(record):
     return {
         "username": record.Username,
         "role": record.Role or "user",
         "mustChangePassword": bool(record.MustChangePassword),
+        "source": "microsoft" if is_microsoft_user(record) else "local",
+        "displayName": getattr(record, "DisplayName", None) or record.Username,
     }
 
 
@@ -396,12 +484,17 @@ def _json_body(request):
 
 
 def _login_config_route(request):
+    from WebServer import microsoft
     _send_json(request, 200, {
         "title": _settings["login_title"],
         "message": _settings["login_message"],
         "logo": _settings["login_logo"],
         "rememberMe": _settings["remember_lifetime"] is not None,
         "minPasswordLength": _settings["min_password_length"],
+        # Only whether the username-first form is on - which name goes where is
+        # decided by POST /api/login/start, so the rules stay on the server.
+        "ssoEnabled": microsoft.enabled(),
+        "ssoOnly": microsoft.sso_only(),
     })
 
 
@@ -421,6 +514,14 @@ def _login_route(request):
     password = str(password)
     remember = bool(credentials.get("rememberMe"))
     ip = client_ip(request) or "?"
+
+    from WebServer import microsoft
+    if not microsoft.password_login_allowed(username):
+        # ssoOnly: decided from settings alone, before any lookup, so it says
+        # nothing about which accounts exist.
+        audit("login_failed", username, "ssoOnly: not in localAccounts", request)
+        _send_json(request, 403, {"error": microsoft.SSO_ONLY_MESSAGE})
+        return
 
     # Only the lockout bookkeeping and the password check hold the lock;
     # responses are sent after it is released, so a slow client can't keep it.
@@ -460,7 +561,7 @@ def _login_route(request):
         db.update_user_password(username, hash_password(password), bool(user_record.MustChangePassword))
         audit("password_rehashed", username, "legacy plaintext upgraded", request)
 
-    db.delete_expired_sessions(time.time())
+    _housekeeping()
     token, max_age = create_token_for_user(username, remember=remember)
     audit("login_ok", username, "remember me" if remember else None, request)
     _send_json(
@@ -470,16 +571,24 @@ def _login_route(request):
     )
 
 
-def _logout_route(request):
+def _end_session(request):
+    """Revoke this request's session. Returns (username, Microsoft sign-out URL or None)."""
+    from WebServer import microsoft
     token = _token_from_request(request)
-    username = None
+    user = None
     if token:
         user = resolve_user(request)
-        username = user["username"] if user else None
         revoke_token(token)
+    return (user["username"] if user else None), microsoft.logout_url(request, user)
+
+
+def _logout_route(request):
+    username, ms_logout = _end_session(request)
     audit("logout", username, None, request)
-    _send_json(request, 200, {"valid": False, "message": "Logged out"},
-               headers={"Set-Cookie": _session_cookie(None)})
+    payload = {"valid": False, "message": "Logged out"}
+    if ms_logout:
+        payload["redirect"] = ms_logout   # auth.js goes there to sign out at Microsoft too
+    _send_json(request, 200, payload, headers={"Set-Cookie": _session_cookie(None)})
 
 
 def _logout_redirect_route(request):
@@ -487,29 +596,29 @@ def _logout_redirect_route(request):
     URL directly into a browser: redirects to / instead of returning JSON,
     so you land back on the login screen (handy for testing as multiple users).
     """
-    token = _token_from_request(request)
-    username = None
-    if token:
-        user = resolve_user(request)
-        username = user["username"] if user else None
-        revoke_token(token)
+    username, ms_logout = _end_session(request)
     audit("logout", username, None, request)
     request.send_response(302)
-    request.send_header('Location', '/')
+    request.send_header('Location', ms_logout or '/')
     request.send_header('Set-Cookie', _session_cookie(None))
     request.end_headers()
 
 
 def _logout_all_route(request):
+    from WebServer import microsoft
     revoke_sessions(request.user["username"])
     audit("logout_all", request.user["username"], None, request)
-    _send_json(request, 200, {"valid": False, "message": "Logged out everywhere"},
-               headers={"Set-Cookie": _session_cookie(None)})
+    payload = {"valid": False, "message": "Logged out everywhere"}
+    ms_logout = microsoft.logout_url(request, request.user)
+    if ms_logout:
+        payload["redirect"] = ms_logout
+    _send_json(request, 200, payload, headers={"Set-Cookie": _session_cookie(None)})
 
 
 def _verify_route(request):
     # WebHandler already enforced authentication and populated request.user.
-    _send_json(request, 200, {"valid": True, "user": request.user})
+    # roleHierarchy lets pages ask hjAuth.hasRole() with the same rule as the server.
+    _send_json(request, 200, {"valid": True, "user": request.user, "roleHierarchy": _settings["role_hierarchy"]})
 
 
 def _change_password_route(request):
@@ -525,6 +634,9 @@ def _change_password_route(request):
 
     username = request.user["username"]
     record = db.get_user_by_username(username)
+    if record is not None and is_microsoft_user(record):
+        _send_json(request, 400, {"error": "Microsoft accounts change their password at Microsoft."})
+        return
     if record is None or not verify_password(str(current), record.PasswordHash):
         audit("password_change_failed", username, "wrong current password", request)
         _send_json(request, 401, {"error": "Current password is incorrect."})

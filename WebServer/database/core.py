@@ -355,6 +355,27 @@ _MIGRATIONS = [
         "mssql": "BIT NOT NULL DEFAULT 0",
         "mysql": "TINYINT NOT NULL DEFAULT 0",
     }),
+    # Microsoft login: ExternalId is the account's Entra object id (oid).
+    ("Users", "ExternalId", {
+        "sqlite": "TEXT",
+        "mssql": "NVARCHAR(64) NULL",
+        "mysql": "VARCHAR(64) NULL",
+    }),
+    ("Users", "DisplayName", {
+        "sqlite": "TEXT",
+        "mssql": "NVARCHAR(256) NULL",
+        "mysql": "VARCHAR(256) NULL",
+    }),
+    ("Users", "Email", {
+        "sqlite": "TEXT",
+        "mssql": "NVARCHAR(256) NULL",
+        "mysql": "VARCHAR(256) NULL",
+    }),
+    ("Users", "RolePinned", {
+        "sqlite": "INTEGER NOT NULL DEFAULT 0",
+        "mssql": "BIT NOT NULL DEFAULT 0",
+        "mysql": "TINYINT NOT NULL DEFAULT 0",
+    }),
     ("Sessions", "LastSeen", {
         "sqlite": "INTEGER NOT NULL DEFAULT 0",
         "mssql": "BIGINT NOT NULL DEFAULT 0",

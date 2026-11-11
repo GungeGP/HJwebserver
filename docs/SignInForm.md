@@ -1,7 +1,9 @@
 # Sign-in form — Microsoft login + local accounts
 
-**Status: design only.** Nothing in this document is implemented yet. It records
-what was agreed on in design discussion, as a spec to build from.
+**Status: implemented** in `WebServer/microsoft.py` (sign-in, Graph, linking,
+account check), `WebServer/auth.py` (roles, ssoOnly, logout) and
+`public/js/auth.js` (the form). Where the code differs from the original
+design, this document has been updated to match it.
 
 HJwebserver is a framework, so everything here is **opt-in per app**. An app that
 only calls `settings(auth=True)` keeps today's username + password form and
@@ -132,7 +134,6 @@ never has to be reachable from the internet.
 |---|---|---|
 | `POST /api/login/start` | yes | Decides the path (above). For Microsoft: creates `state`, `nonce` and a PKCE verifier, stores them in the `hj_sso` cookie and returns the authorize URL with `login_hint` |
 | `GET /auth/microsoft/callback` | yes | Checks `state`, exchanges the code (client secret + PKCE), validates the ID token, reads Graph, links the user, starts the session |
-| `GET /auth/microsoft/logout` | yes | Used by `microsoftLogout`: ends the local session, then sends the browser to Microsoft's end-session endpoint and back to `/` |
 
 Scopes: `openid profile email offline_access User.Read`, plus
 `GroupMember.Read.All` when `microsoftRoles` is set.
@@ -204,7 +205,8 @@ python -m WebServer setrole mgu@hjoerring.dk admin --pin             # Graph won
 python -m WebServer setrole mgu@hjoerring.dk admin --unpin
 ```
 
-`createUser(username, password=None, ...)` is allowed for `--sso` users.
+In Python: `app.createUser("mgu@hjoerring.dk", role="admin", sso=True)` and
+`app.setRole("mgu@hjoerring.dk", "admin", pin=True)`.
 `listusers` shows the source (`local` / `microsoft`) and pinned roles.
 
 ## Roles
@@ -277,8 +279,14 @@ Without `roleHierarchy` roles keep today's exact match, so existing apps don't c
 
 With `microsoftLogout=True`, logout ends the local session **and** signs out at
 Microsoft, so the next person at a shared PC isn't signed straight in as the
-previous user. `/api/login/start` also sends `prompt=select_account` so
-Microsoft asks which account to use instead of picking the remembered one.
+previous user. `POST /api/logout` and `/api/logout-all` answer with a
+`redirect` to Microsoft's sign-out page for Microsoft users, which `auth.js`
+follows; `GET /logout` redirects there directly. Microsoft sends the browser
+back to `https://<host>/` only if that address is registered on the app
+registration; otherwise it shows its own "You signed out" page.
+
+The typed name is sent as `login_hint`, so Microsoft signs in that account
+rather than whichever one the browser remembers.
 
 ## Disabled users
 
@@ -350,20 +358,28 @@ Per system, IT creates one Entra app registration:
 
 1. Redirect URIs: `http://localhost:<port>/auth/microsoft/callback` for
    testing, `https://<internal host>/auth/microsoft/callback` for production.
-2. A client credential: a certificate if IT supports it, otherwise a secret.
-   A secret expires (at most 24 months); the server warns at startup when it
-   is close to expiring.
+2. A client secret. It expires (at most 24 months): put the date in `.env`
+   as `MS_CLIENT_SECRET_EXPIRES=YYYY-MM-DD` and the server warns at startup
+   from 30 days before. (Certificates instead of secrets are not supported yet.)
 3. Delegated permissions `User.Read` (and `GroupMember.Read.All` with
    `microsoftRoles`), admin consent granted. `User.Read.All` (application)
    only with `microsoftCheckEnabled`.
 4. "Assignment required = Yes" for systems using `microsoftNewUsers=True`.
 5. The group object ids for `microsoftRoles`.
 
+6. Optionally `https://<internal host>/` as a redirect URI too, so Microsoft
+   sends people back after signing out.
+
 Production needs an internal host name and HTTPS: `useHttps()` with an
 internal-CA certificate, or IIS / nginx in front with
 `settings(secureCookie=True, trustProxy=True)`. The server needs outbound
 HTTPS to `login.microsoftonline.com` and `graph.microsoft.com` (check for a
 proxy). Nothing has to be reachable from the internet.
+
+## Requirements
+
+`cryptography` (in `requirements.txt`) is needed to check the signature on
+Microsoft's tokens. Calls to Microsoft go through `HTTPS_PROXY` if it is set.
 
 ## Prerequisite: threading
 

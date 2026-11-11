@@ -122,9 +122,20 @@ app.settings(auth=True, tokenLifetimeHours=8, maxLoginAttempts=3)
 | `loginTitle` | `"Access Restricted"` | Heading on the login form. |
 | `loginMessage` | `"Please log in to continue."` | Text under the heading. |
 | `loginLogo` | `None` | URL of an image shown above the form, e.g. `"/logo.png"`. |
-| `loginTitle` | `"Access Restricted"` | Heading on the login form. |
-| `loginMessage` | `"Please log in to continue."` | Text under the heading. |
-| `loginLogo` | `None` | URL of an image shown above the form, e.g. `"/logo.png"`. |
+| `roleHierarchy` | `None` | Ranked roles, highest first, e.g. `["dev", "admin", "user"]`. `roles=[...]` then means "this role or higher". `None` = exact match. |
+| `auditRetentionDays` | `None` | Delete audit log rows older than this. `None` = keep forever. |
+| `ssoDomains` | `None` | Turns on Microsoft login, e.g. `["hjoerring.dk"]`. Needs `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` in `.env`. |
+| `ssoOnly` | `False` | No password login except for `localAccounts`. |
+| `localAccounts` | `None` | Under `ssoOnly`: names that may still use a password. |
+| `microsoftNewUsers` | `False` | Create users on their first Microsoft login. |
+| `microsoftRoles` | `None` | `{Entra group id: role}`, read from Microsoft Graph at every login. |
+| `microsoftGuests` | `False` | Allow guest accounts from other organizations. |
+| `microsoftSessionHours` | `8` | Session lifetime for Microsoft users. |
+| `microsoftLogout` | `True` | Logout also signs out at Microsoft. |
+| `microsoftCheckEnabled` | `False` | Every 10 minutes, end sessions of users disabled in Entra. |
+| `microsoftRedirectUri` | `None` | Override the callback URL built from the request's host. |
+
+The Microsoft parameters are explained in [Sign-in form — Microsoft login](SignInForm.md).
 
 Calling `settings()` without `auth=True` (or not at all) leaves the server fully open.
 

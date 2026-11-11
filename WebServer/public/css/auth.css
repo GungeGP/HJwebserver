@@ -32,3 +32,10 @@
 }
 .login-box button:disabled { background-color: #E3EDF3; color: #2C3531; cursor: not-allowed; }
 .login-box button.secondary { background: none; color: #00563B; margin-top: 8px; }
+/* "Taking you to Microsoft sign-in…" */
+.login-box p.status { margin: -5px 0 15px; color: #00563B; }
+/* "Try again" on the page shown when a Microsoft sign-in fails */
+.login-box a.button {
+    display: block; background-color: #00563B; color: white; border-radius: 10px;
+    padding: 10px; font-size: 1em; text-decoration: none;
+}

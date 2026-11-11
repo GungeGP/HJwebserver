@@ -152,6 +152,22 @@ refuse the header entirely if only browsers will ever call the server.
 - There is no self-registration endpoint and no "forgot password" e-mail flow;
   an admin resets passwords with `python -m WebServer setpassword <name> --temporary`.
 
+## Microsoft login (SSO)
+
+Off unless the app sets `ssoDomains`. Then the login form asks for a username
+or work email first, and the server decides: an address in `ssoDomains` (or a
+bare name like `mgu`) goes to Microsoft, a local account gets a password field.
+The password login keeps working next to it unless `ssoOnly=True`.
+
+```python
+app.settings(auth=True, ssoDomains=["hjoerring.dk"])
+```
+
+The app registration comes from `.env` (`MS_TENANT_ID`, `MS_CLIENT_ID`,
+`MS_CLIENT_SECRET`). Everything else — `ssoOnly`, `localAccounts`, Microsoft
+groups as roles, ranked roles with `roleHierarchy`, what to ask IT for — is in
+[Sign-in form — Microsoft login](SignInForm.md).
+
 ## Framework routes
 
 | Route | Public | Body / response |
@@ -160,7 +176,9 @@ refuse the header entirely if only browsers will ever call the server.
 | `POST /api/login` | yes | body `{"username", "password", "rememberMe"?}` → `200 {"valid": true, "token", "user"}` + cookie; `401` wrong; `403` disabled; `429` locked |
 | `POST /api/logout` | yes | clears the cookie → `200` |
 | `POST /api/logout-all` | no | revokes every session of the user → `200` |
-| `GET /api/verify` | no | `200 {"valid": true, "user": {"username", "role", "mustChangePassword"}}` or `401` |
+| `GET /api/verify` | no | `200 {"valid": true, "user": {"username", "role", "mustChangePassword", "source", "displayName"}, "roleHierarchy"}` or `401` |
+| `POST /api/login/start` | yes | body `{"username", "next"?}` → `{"method": "microsoft", "redirect"}` or `{"method": "password"}`; `403` under `ssoOnly`. Only with `ssoDomains` |
+| `GET /auth/microsoft/callback` | yes | Where Microsoft sends the browser back. Only with `ssoDomains` |
 | `POST /api/change-password` | no | body `{"currentPassword", "newPassword"}` → `200`; `401` wrong current; `400` policy |
 
 While a password change is pending, every other protected route answers

@@ -81,19 +81,21 @@ class TableViewerMixin:
         deleting_enabled = bool(self.auth) and bool(delete) and not readOnly and not query
         delete_roles = list(delete) if isinstance(delete, (list, tuple, set)) else None
 
+        from WebServer.auth import has_role
+
         def can_edit(request):
             if not editing_enabled:
                 return False
             user = getattr(request, 'user', None)
             if not user:
                 return False
-            return not edit or user.get('role') in edit
+            return has_role(user.get('role'), edit)
 
         def can_delete(request):
             user = getattr(request, 'user', None)
             if not deleting_enabled or not user:
                 return False
-            return not delete_roles or user.get('role') in delete_roles
+            return has_role(user.get('role'), delete_roles)
 
         def query_of(request):
             # keep_blank_values: "f0=" means "filter cleared", not "use the default".

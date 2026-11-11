@@ -97,13 +97,14 @@ class WebHandler(BaseHTTPRequestHandler):
         if user.get("mustChangePassword") and not getattr(handler_function, '_hj_allow_pending_password', False):
             return self._deny(403, {"error": "password_change_required"}, login_shell=wants_html)
 
-        if roles and user.get("role") not in roles:
-            from WebServer.auth import audit
-            # Path without the query string: searches can hold personal data.
-            audit("access_denied", user.get("username"),
-                  f"{method} {self.path.split('?')[0]} needs {' or '.join(roles)}, has {user.get('role')}", self)
-            return self._deny(403, {"error": "Forbidden: this requires role " + " or ".join(roles) + "."},
-                              login_shell=False, html=wants_html)
+        if roles:
+            from WebServer.auth import audit, describe_roles, has_role
+            if not has_role(user.get("role"), roles):
+                # Path without the query string: searches can hold personal data.
+                audit("access_denied", user.get("username"),
+                      f"{method} {self.path.split('?')[0]} needs {describe_roles(roles)}, has {user.get('role')}", self)
+                return self._deny(403, {"error": f"Forbidden: this requires role {describe_roles(roles)}."},
+                                  login_shell=False, html=wants_html)
 
         self.user = user
         return True

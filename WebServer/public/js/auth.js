@@ -1,6 +1,8 @@
 // Framework login overlay. The session lives in an HttpOnly cookie set by the
 // server, so this file never sees or stores the token. It:
 //   * renders the login form when the server says we're not authenticated
+//     (username-first when the app uses Microsoft login: the server decides
+//     whether a typed name goes to Microsoft or gets a password field)
 //   * renders a change-password form when the server requires it (or on request)
 //   * reloads the page after a successful login (so protected content is served)
 //   * watches every fetch() for 401/403 and re-shows the right form
@@ -13,7 +15,11 @@
 //   window.addEventListener('hj:ready', e => ...)   fired once with e.detail.user (or null)
 
 (function () {
-    let config = { title: 'Access Restricted', message: 'Please log in to continue.', logo: null, rememberMe: true, minPasswordLength: 8 };
+    let config = { title: 'Access Restricted', message: 'Please log in to continue.', logo: null, rememberMe: true, minPasswordLength: 8,
+                   ssoEnabled: false, ssoOnly: false };
+    let roleHierarchy = null;   // from /api/verify, for hasRole()
+    // Username-first form (ssoEnabled): 'name' until the server answers, then 'password' for local accounts.
+    let stage = 'name';
     // Public pages (addPath(..., public=True)) never show the login form on
     // their own - only when the page asks for it with hjAuth.showLogin().
     const publicPage = document.currentScript?.dataset.hjPage === 'public';
@@ -27,6 +33,7 @@
         changePassword,
         showChangePassword: () => showOverlay('change'),
         showLogin: () => showOverlay('login'),
+        hasRole,
     };
 
     // Wrap fetch so auth failures from a protected route bring the right form back.
@@ -58,6 +65,12 @@
         if (session.status === 200) {
             const data = await session.json();
             window.currentUser = data.user;
+            roleHierarchy = data.roleHierarchy || null;
+            if (data.user && data.user.source === 'microsoft') {
+                // Their password lives at Microsoft.
+                const button = document.getElementById('change-password');
+                if (button) { button.style.display = 'none'; }
+            }
             if (data.user && data.user.mustChangePassword) {
                 showOverlay('change', true);
             } else {
@@ -80,6 +93,7 @@
 
     async function login(event) {
         if (event) { event.preventDefault(); }
+        if (config.ssoEnabled && stage === 'name') { return startLogin(); }
         const userField = document.getElementById('username');
         const passField = document.getElementById('password');
         const remember = document.getElementById('remember-me');
@@ -112,6 +126,82 @@
             console.error('Login request failed:', error);
             Notify('Could not connect to the server.', 'error');
         }
+    }
+
+    // Username-first: ask the server where this name signs in.
+    async function startLogin() {
+        const userField = document.getElementById('username');
+        const remember = document.getElementById('remember-me');
+        const username = userField?.value.trim();
+        if (!username) { Notify('Enter your username or work email.', 'error'); return; }
+
+        document.getElementById('login-btn').disabled = true;
+        let data = {};
+        let response;
+        try {
+            response = await originalFetch('/api/login/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, next: location.pathname + location.search,
+                                       rememberMe: !!(remember && remember.checked) })
+            });
+            try { data = await response.json(); } catch (_) { }
+        } catch (error) {
+            console.error('Login request failed:', error);
+            Notify('Could not connect to the server.', 'error');
+            updateLoginState();
+            return;
+        }
+
+        if (response.ok && data.method === 'microsoft') {
+            setStatus('Taking you to Microsoft sign-in…');
+            userField.disabled = true;
+            window.location.href = data.redirect;
+        } else if (response.ok && data.method === 'password') {
+            showPasswordStage();
+        } else {
+            Notify(data.error || 'Could not sign in.', 'error');
+            updateLoginState();
+        }
+    }
+
+    function showPasswordStage() {
+        stage = 'password';
+        document.getElementById('password').style.display = '';
+        const remember = document.querySelector('.login-box label.remember');
+        if (remember) { remember.style.display = ''; }
+        document.getElementById('login-btn').textContent = 'Sign in';
+        updateLoginState();
+        document.getElementById('password').focus();
+    }
+
+    // Back to "type your name": any edit of the name after it was resolved.
+    function resetToNameStage() {
+        if (!config.ssoEnabled || stage === 'name') { return; }
+        stage = 'name';
+        const pass = document.getElementById('password');
+        pass.value = '';
+        pass.style.display = 'none';
+        const remember = document.querySelector('.login-box label.remember');
+        if (remember) { remember.style.display = 'none'; }
+        document.getElementById('login-btn').textContent = 'Continue';
+        setStatus('');
+    }
+
+    function setStatus(text) {
+        const status = document.getElementById('login-status');
+        if (status) { status.textContent = text; status.style.display = text ? '' : 'none'; }
+    }
+
+    // "this role or higher" with roleHierarchy, exact match without - same rule as the server.
+    function hasRole(role) {
+        const mine = window.currentUser && window.currentUser.role;
+        if (!mine) { return false; }
+        if (mine === role) { return true; }
+        if (!roleHierarchy) { return false; }
+        const rank = roleHierarchy.indexOf(mine);
+        const needed = roleHierarchy.indexOf(role);
+        return rank !== -1 && needed !== -1 && rank <= needed;
     }
 
     async function changePassword(currentPassword, newPassword) {
@@ -147,16 +237,19 @@
         }
     }
 
-    async function logout() {
-        try { await originalFetch('/api/logout', { method: 'POST' }); }
-        catch (error) { console.error('Logout request failed:', error); }
-        window.location.reload();
-    }
+    async function logout() { await endSession('/api/logout'); }
 
-    async function logoutEverywhere() {
-        try { await originalFetch('/api/logout-all', { method: 'POST' }); }
-        catch (error) { console.error('Logout request failed:', error); }
-        window.location.reload();
+    async function logoutEverywhere() { await endSession('/api/logout-all'); }
+
+    // A Microsoft user also gets signed out at Microsoft (microsoftLogout):
+    // the server answers with where to go for that.
+    async function endSession(url) {
+        let redirect = null;
+        try {
+            const response = await originalFetch(url, { method: 'POST' });
+            try { redirect = (await response.json()).redirect || null; } catch (_) { }
+        } catch (error) { console.error('Logout request failed:', error); }
+        if (redirect) { window.location.href = redirect; } else { window.location.reload(); }
     }
 
     // ------------------------------------------------------------------ UI
@@ -165,7 +258,8 @@
         const username = document.getElementById('username')?.value.trim();
         const password = document.getElementById('password')?.value;
         const submitBtn = document.getElementById('login-btn');
-        if (submitBtn) { submitBtn.disabled = !(username && password); }
+        const needsPassword = !config.ssoEnabled || stage === 'password';
+        if (submitBtn) { submitBtn.disabled = !(username && (password || !needsPassword)); }
     }
 
     function showOverlay(mode, forced) {
@@ -179,6 +273,7 @@
         if (cancel) { cancel.style.display = forced ? 'none' : ''; }
         const note = document.getElementById('change-note');
         if (note) { note.textContent = forced ? 'You must set a new password before continuing.' : 'Choose a new password.'; }
+        if (mode === 'login') { resetToNameStage(); }
         (mode === 'login' ? document.getElementById('username') : document.getElementById('current-password'))?.focus();
     }
 
@@ -208,10 +303,11 @@
                 <form id="login-form">
                     <h2></h2>
                     <p></p>
-                    <input type="text" id="username" placeholder="Username" autocomplete="username">
-                    <input type="password" id="password" placeholder="Password" autocomplete="current-password">
-                    ${config.rememberMe ? '<label class="remember"><input type="checkbox" id="remember-me"> Remember me</label>' : ''}
-                    <button id="login-btn" disabled type="submit">Sign In</button>
+                    <input type="text" id="username" placeholder="${config.ssoEnabled ? 'Username or work email' : 'Username'}" autocomplete="username">
+                    <input type="password" id="password" placeholder="Password" autocomplete="current-password"${config.ssoEnabled ? ' style="display:none"' : ''}>
+                    ${config.rememberMe ? `<label class="remember"${config.ssoEnabled ? ' style="display:none"' : ''}><input type="checkbox" id="remember-me"> Remember me</label>` : ''}
+                    <p id="login-status" class="status" style="display:none"></p>
+                    <button id="login-btn" disabled type="submit">${config.ssoEnabled ? 'Continue' : 'Sign In'}</button>
                 </form>
                 <form id="change-form" style="display:none">
                     <h2>Change password</h2>
@@ -235,7 +331,7 @@
         loginForm.addEventListener('submit', login);
         // Explicit Enter handling; preventDefault stops the implicit submit so login() runs once.
         loginForm.addEventListener('keydown', (e) => { if (e.key === 'Enter') { login(e); } });
-        document.getElementById('username').addEventListener('input', updateLoginState);
+        document.getElementById('username').addEventListener('input', () => { resetToNameStage(); updateLoginState(); });
         document.getElementById('password').addEventListener('input', updateLoginState);
 
         const changeForm = document.getElementById('change-form');

@@ -7,8 +7,9 @@ configuration, so keep `app.start()` behind `if __name__ == "__main__":`.
 
 Commands:
     createuser <name> [--role R] [--password P] [--temporary]
+    createuser <name@domain> --sso [--role R]     (Microsoft account, no password)
     setpassword <name> [--password P] [--temporary]
-    setrole <name> <role>
+    setrole <name> <role> [--pin | --unpin]
     disable <name> | enable <name> | deleteuser <name>
     listusers | user <name>
     sessions <name> | revoke <name>
@@ -70,11 +71,15 @@ def main(argv=None):
     p = sub.add_parser("createuser", help="create a user"); p.add_argument("name")
     p.add_argument("--role", default="user"); p.add_argument("--password")
     p.add_argument("--temporary", action="store_true", help="user must change the password at first login")
+    p.add_argument("--sso", action="store_true", help="Microsoft account: no password, linked at its first Microsoft login")
 
     p = sub.add_parser("setpassword", help="set a user's password (logs them out everywhere)"); p.add_argument("name")
     p.add_argument("--password"); p.add_argument("--temporary", action="store_true")
 
     p = sub.add_parser("setrole", help="change a user's role"); p.add_argument("name"); p.add_argument("role")
+    pin = p.add_mutually_exclusive_group()
+    pin.add_argument("--pin", dest="pin", action="store_const", const=True, help="Microsoft groups never change this role")
+    pin.add_argument("--unpin", dest="pin", action="store_const", const=False, help="let Microsoft groups set it again")
     p = sub.add_parser("disable", help="block logins, keep the account"); p.add_argument("name")
     p = sub.add_parser("enable", help="re-enable a disabled account"); p.add_argument("name")
     p = sub.add_parser("deleteuser", help="delete a user"); p.add_argument("name")
@@ -96,13 +101,18 @@ def main(argv=None):
 
     try:
         if args.command == "createuser":
-            ok = app.createUser(args.name, _password(args), role=args.role, mustChangePassword=args.temporary)
+            if args.sso:
+                ok = app.createUser(args.name, role=args.role, sso=True)
+            else:
+                ok = app.createUser(args.name, _password(args), role=args.role, mustChangePassword=args.temporary)
             return done(ok, f"Created {args.name} ({args.role}).", f"{args.name} already exists.")
         if args.command == "setpassword":
             ok = app.setPassword(args.name, _password(args), mustChangePassword=args.temporary)
             return done(ok, f"Password set for {args.name}.", f"No such user: {args.name}")
         if args.command == "setrole":
-            return done(app.setRole(args.name, args.role), f"{args.name} is now {args.role}.", f"No such user: {args.name}")
+            pinned = {True: " (pinned)", False: " (unpinned)"}.get(args.pin, "")
+            return done(app.setRole(args.name, args.role, pin=args.pin), f"{args.name} is now {args.role}{pinned}.",
+                        f"No such user: {args.name}")
         if args.command == "disable":
             return done(app.disableUser(args.name), f"{args.name} disabled.", f"No such user: {args.name}")
         if args.command == "enable":
@@ -110,8 +120,9 @@ def main(argv=None):
         if args.command == "deleteuser":
             return done(app.deleteUser(args.name), f"{args.name} deleted.", f"No such user: {args.name}")
         if args.command == "listusers":
-            _table([(u["username"], u["role"], "yes" if u["disabled"] else "", "yes" if u["mustChangePassword"] else "")
-                    for u in app.listUsers()], ["username", "role", "disabled", "must change pw"])
+            _table([(u["username"], u["role"] + (" (pinned)" if u["rolePinned"] else ""), u["source"],
+                     "yes" if u["disabled"] else "", "yes" if u["mustChangePassword"] else "")
+                    for u in app.listUsers()], ["username", "role", "source", "disabled", "must change pw"])
             return 0
         if args.command == "user":
             u = app.getUser(args.name)
