@@ -16,10 +16,10 @@ tags inserted just before `</body>`:
 The `?v=` value changes whenever the file changes, so browsers never use a stale copy.
 
 You can override any of these by putting your own copy at the same relative path
-under your `public/` folder (`public/js/auth.js`, `public/css/auth.css`, ...); the
-framework serves yours instead of its bundled copy. Stylesheets (`css/auth.css`,
-`css/TableViewer.css`, `css/Dialog.css`) are linked at runtime by their matching
-script, not injected server-side.
+under your `public/` folder (`public/js/auth.js`, `public/css/Dialog.css`, ...); the
+framework serves yours instead of its bundled copy. Stylesheets
+(`css/TableViewer.css`, `css/Dialog.css`, `css/calender.css`) are linked at
+runtime by their matching script, not injected server-side.
 
 ## Shared header, footer, navigation — includes
 
@@ -85,8 +85,7 @@ body) to show toasts, banners, etc.:
 </script>
 ```
 
-The login overlay uses it to report "Invalid username or password." and
-connection failures.
+The calendar uses it to report what the server answered.
 
 ## `Dialog.js` — popups: `hjDialog`
 
@@ -169,103 +168,65 @@ element's height must come from somewhere (`100vh`, or `html, body { height: 100
 around it) — it never shrinks below 360px. Styling: classes start with
 `calendar-`; see `css/calender.css`.
 
-## `auth.js` — the login overlay
+## `auth.js` — who is logged in
 
-Present only when `settings(auth=True)`. On page load it:
+Present only when `settings(auth=True)`. Authentik logs people in before the
+page is ever sent, so there is no login form; `auth.js` only tells the page who
+it is. As soon as it loads it:
 
-1. Fetches `/api/login-config` (title, message, logo, whether "Remember me" is on)
-   and `/api/verify` in parallel, and builds a hidden overlay with two forms:
-   **login** and **change password**.
-2. If the session is valid the overlay stays hidden — unless the account has a
-   temporary password, in which case the change-password form is shown and
-   cannot be dismissed. If no one is logged in, the login form is shown.
-3. Wraps `window.fetch`: a `401` from any of *your* API calls re-shows the login
-   form; a `403 password_change_required` shows the change-password form.
-4. Fires `hj:ready` on `window` once, with the user (or `null`).
+1. Fetches `GET /api/verify`: the user, `roleHierarchy`, and the
+   [form token](auth.md#form-token).
+2. Wraps `window.fetch`: every `POST`, `PUT` and `DELETE` to the same site gets
+   the form token in `X-CSRF-Token`, waiting for `/api/verify` if it hasn't
+   answered yet. A `401` from any call reloads the page, so Authentik can show
+   its login (at most once every 10 seconds, so a misconfigured path can't
+   reload forever).
+3. Fires `hj:ready` on `window` once the page has loaded, with the user (or `null`).
 
-On a **public page** (`addPath(..., public=True)`) steps 2 and 3 never show the
-login form; a `401` there is left to your page. `hjAuth.showLogin()` still opens
-it, for a "Log in" button.
-
-On a successful login or password change the page reloads, so its data loads
-with the new session.
+On a **public page** (`addPath(..., public=True)`) a `401` never reloads the
+page: Authentik lets the page through without a login, so reloading wouldn't
+bring one up. `e.detail.user` is `null` there unless someone is logged in.
 
 ### Knowing who is logged in
 
-```js
-window.addEventListener('hj:ready', (e) => {
-    const user = e.detail.user;          // {username, role, mustChangePassword} or null
-    if (user) { header.textContent = `Hi ${user.username}`; }
-    if (user?.role === 'admin') { adminPanel.hidden = false; }
-});
-```
-
-`window.currentUser` holds the same object after `hj:ready` has fired. Hiding
-an element in the page is cosmetic only — the server still enforces `roles=`
-on the routes behind it.
-
-### Buttons that just work
-
-Give any element one of these ids and `auth.js` wires it up:
-
-| id | Action |
-|----|--------|
-| `logout` | `POST /api/logout`, then reload |
-| `logout-all` | `POST /api/logout-all` (every device), then reload |
-| `change-password` | opens the change-password form (with a Cancel button) |
-
 ```html
-<button id="change-password">Change password</button>
-<button id="logout">Log out</button>
+<span id="navn"></span>
+<button id="slet" hidden>Slet</button>
+<button id="logout">Log ud</button>
+<script>
+window.addEventListener('hj:ready', e => {
+    document.getElementById('navn').textContent = e.detail.user.name;
+    if (hjAuth.hasRole('admin')) { document.getElementById('slet').hidden = false; }
+});
+</script>
 ```
+
+`e.detail.user` is the same object as `request.user` on the server:
+`{username, name, email, role, groups}`. `window.currentUser` holds it after
+`hj:ready` has fired. Hiding an element in the page is cosmetic only — the
+server still enforces `roles=` on the routes behind it.
 
 ### `window.hjAuth`
 
-For your own code:
-
 ```js
-hjAuth.user                          // same as window.currentUser
-await hjAuth.logout()                // reloads
-await hjAuth.logoutEverywhere()      // reloads
-hjAuth.showChangePassword()          // opens the form
-hjAuth.showLogin()                   // opens the login form
-const { ok, error } = await hjAuth.changePassword(current, next)   // no reload; error is a message or null
+hjAuth.user              // same as window.currentUser
+hjAuth.hasRole('admin')  // "admin or higher" with roleHierarchy, exactly admin without - the server's rule
+hjAuth.logout()          // to /logout, which sends the browser to Authentik's sign-out
 ```
 
-### Customising the form
-
-Text, message and logo come from the server:
-
-```python
-app.settings(auth=True, loginTitle="WorkTime", loginMessage="Sign in with your company account", loginLogo="/logo.png")
-```
-
-(`loginLogo` must be served publicly — `app.addPath('/logo.png', 'public/logo.png', public=True)`.)
-
-For styling, the ids and classes are stable:
-
-| Selector | Element |
-|----------|---------|
-| `#login-overlay` | full-screen dimmed backdrop |
-| `.login-box` | the white card |
-| `#login-form`, `#change-form` | the two `<form>`s |
-| `#username`, `#password`, `#remember-me` | login inputs |
-| `#current-password`, `#new-password`, `#confirm-password` | change-password inputs |
-| `#login-btn`, `#change-btn`, `#change-cancel` | buttons |
-
-Your page's CSS loads before the injected script's inline styles, so use
-slightly more specific selectors (e.g. `body #login-btn`) or `!important` to win.
+A `<button id="logout">` is wired to `hjAuth.logout()` by itself.
 
 ## Calling your API from the page
 
-Nothing special is needed. The session cookie travels with every request:
+Nothing special is needed. Authentik's cookie travels with every request, and
+`auth.js` adds the form token to changing calls:
 
 ```js
 const res = await fetch('/api/my-entries');
 if (res.ok) {
     const data = await res.json();
 }
-// a 401 here is already handled by auth.js (overlay re-appears; not on public pages)
+// a 401 here is already handled by auth.js (the page reloads; not on public pages)
 ```
 
 For `POST`, send JSON so the server parses `request.body` for you:
@@ -277,3 +238,6 @@ await fetch('/api/data', {
     body: JSON.stringify({ hours: 7.5 })
 });
 ```
+
+Send changes with `fetch()`. A plain HTML `<form method="post">` and
+`XMLHttpRequest` don't get the form token, so the server refuses them with `403`.
