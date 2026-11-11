@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from datetime import datetime
 
@@ -6,14 +7,22 @@ from WebServer import WebServer
 from WebServer.helper import send_json
 from WebServer.tableviewer import selectFilter
 
-app = WebServer(port=8080)
+# Behind Authentik: the proxy reaches the app over the network, so it listens on all interfaces.
+app = WebServer(host="0.0.0.0", port=8080)   # reads .env, so os.environ works from here on
 # type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
 app.setDatabase(type="mssql", server="localhost", dbName="Forsorg")  # Windows login; add user=/password= for a SQL Server login
 # app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html')
 app.addPath('/cal', 'public/cal.html')
-app.settings(auth=True)  # Every route/page now requires login unless registered with public=True
+# Every route/page now requires a user from Authentik unless registered with public=True.
+# Needs PROXY_SECRET and JWT_SECRET in .env, and this app's own GROUP_ADMIN: the
+# Authentik group whose members are admins. Everyone else Authentik lets in is "user".
+app.settings(auth=True,
+             roleHierarchy=["admin", "user"],
+             authentikRoles={os.environ["GROUP_ADMIN"]: "admin"})
+# Local development without Authentik: WebServer(port=8080) instead (listens on 127.0.0.1 only),
+# and add  devUser={"username": "test", "groups": [os.environ["GROUP_ADMIN"]]}  to settings().
 
 def valid_cpr(cpr):
     """ddmmyy-xxxx where ddmmyy is a real date."""
@@ -62,11 +71,6 @@ def cal_selected(request):
     send_json(request, 200, {"start": start.isoformat(), "end": end.isoformat(),
                              "days": (end - start).days + 1})
 
-
-# Create an admin user
-# python -m WebServer createuser admin --role admin
-user_created = app.createUser("admin", "12345", role="admin")   # False if it already exists
-print(f"Admin user created: {user_created}")
 
 if __name__ == "__main__":
     app.start()
