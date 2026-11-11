@@ -14,6 +14,7 @@ Helpers for main.py live here too: dateFilter(), selectFilter(), duration().
 import datetime as _dt
 import json
 import re
+import threading
 import time
 from decimal import Decimal
 
@@ -32,6 +33,11 @@ REASON_MAX = 500      # longest delete reason; it goes into AuditLog.Detail (102
 SPEC_TTL = 60         # seconds a resolved spec is trusted before the schema is read again
 
 KINDS = ("text", "number", "bool", "date", "time", "datetime")
+
+# Saves and deletes run one at a time, across every viewer (two viewers may
+# show the same table). Each reads the row as it was and then writes the change
+# plus its ledger entry; interleaved, the ledger's old values could be wrong.
+_write_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -193,14 +199,16 @@ class TableViewer:
         self.validate = validate
         self._spec = None
         self._spec_at = 0.0
+        self._spec_lock = threading.Lock()
 
     # --- spec ---------------------------------------------------------------
 
     def spec(self):
-        if self._spec is None or time.monotonic() - self._spec_at > SPEC_TTL:
-            self._spec = self._resolve()
-            self._spec_at = time.monotonic()
-        return self._spec
+        with self._spec_lock:   # one thread re-reads the schema, the others wait for its result
+            if self._spec is None or time.monotonic() - self._spec_at > SPEC_TTL:
+                self._spec = self._resolve()
+                self._spec_at = time.monotonic()
+            return self._spec
 
     def _resolve(self):
         cfg = self.config
@@ -639,6 +647,10 @@ class TableViewer:
         Every change is written to the tableviewLedger (old and new values, by
         `username`) in the same transaction as the change itself.
         """
+        with _write_lock:
+            return self._save(body, username)
+
+    def _save(self, body, username):
         spec = self.spec()
         base, related = spec["base"], spec["related"]
         values = body.get("values")
@@ -728,6 +740,10 @@ class TableViewer:
         it was goes into the tableviewLedger with the reason, in the same
         transaction as the delete. Raises ValueError with a message for the
         user otherwise."""
+        with _write_lock:
+            self._delete(body, username)
+
+    def _delete(self, body, username):
         spec = self.spec()
         base = spec["base"]
         if spec["query"] or not base["key"]:

@@ -9,9 +9,15 @@ from WebServer.page import inject_js_scripts, process_includes
 # Largest request body a route will accept (override with WebServer(...).max_body_bytes).
 MAX_BODY_BYTES = 10 * 1024 * 1024
 
+# Seconds a client may stay silent mid-request (or mid-TLS-handshake) before
+# the connection is dropped, so a stalled client can't hold a thread forever.
+REQUEST_TIMEOUT = 30
+
 
 class WebHandler(BaseHTTPRequestHandler):
     """The engine that handles incoming requests."""
+
+    timeout = REQUEST_TIMEOUT
 
     def __init__(self, *args, **kwargs):
         self._sent_headers = set()

@@ -18,6 +18,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 from datetime import timedelta
 from http.cookies import SimpleCookie
@@ -51,6 +52,12 @@ _settings = {
 }
 
 _TOUCH_INTERVAL = 60   # seconds between LastSeen writes for one session
+
+# Password checks run one at a time. Lockout counting reads LoginAttempts and
+# then writes it, so parallel attempts (threaded server) could otherwise all
+# pass the lockout check before any failure is counted, and race on
+# inserting the same LoginAttempts row.
+_login_lock = threading.Lock()
 
 
 def normalize_username(username):
@@ -415,23 +422,31 @@ def _login_route(request):
     remember = bool(credentials.get("rememberMe"))
     ip = client_ip(request) or "?"
 
-    remaining = _lockout_remaining(username, ip)
+    # Only the lockout bookkeeping and the password check hold the lock;
+    # responses are sent after it is released, so a slow client can't keep it.
+    with _login_lock:
+        remaining = _lockout_remaining(username, ip)
+        user_record = None
+        ok = False
+        if not remaining:
+            user_record = db.get_user_by_username(username)
+            if user_record is None:
+                # Spend the same time as a real check so timing can't reveal which usernames exist.
+                verify_password(password, _settings["dummy_hash"])
+            else:
+                ok = verify_password(password, user_record.PasswordHash)
+            if not ok:
+                _record_failure(username, ip)
+            elif not user_record.Disabled:
+                _clear_failures(username, ip)
+
     if remaining:
         audit("login_locked", username, f"retry in {remaining}s", request)
         _send_json(request, 429, {"error": f"Too many failed attempts. Try again in {remaining} seconds."},
                    headers={"Retry-After": str(remaining)})
         return
 
-    user_record = db.get_user_by_username(username)
-    if user_record is None:
-        # Spend the same time as a real check so timing can't reveal which usernames exist.
-        verify_password(password, _settings["dummy_hash"])
-        ok = False
-    else:
-        ok = verify_password(password, user_record.PasswordHash)
-
     if not ok:
-        _record_failure(username, ip)
         audit("login_failed", username, None, request)
         _send_json(request, 401, {"error": "Invalid username or password."})
         return
@@ -441,7 +456,6 @@ def _login_route(request):
         _send_json(request, 403, {"error": "This account is disabled."})
         return
 
-    _clear_failures(username, ip)
     if needs_rehash(user_record.PasswordHash):
         db.update_user_password(username, hash_password(password), bool(user_record.MustChangePassword))
         audit("password_rehashed", username, "legacy plaintext upgraded", request)

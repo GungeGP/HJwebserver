@@ -10,15 +10,61 @@ you typically call them.
 
 ---
 
-## `WebServer(host="127.0.0.1", port=8000, static_dir=None)`
+## `WebServer(host="127.0.0.1", port=8000, static_dir=None, threaded=True)`
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
 | `host` | `"127.0.0.1"` | Interface to listen on. Use `"0.0.0.0"` to accept connections from other machines. |
 | `port` | `8000` | TCP port. |
 | `static_dir` | `None` | Folder to serve static files from. When omitted the framework looks for a `public/` folder next to your script, then in the current directory. |
+| `threaded` | `True` | Handle requests at the same time, each in its own thread. `False` handles one request at a time, as before. See [Threads](#threads). |
 
 On startup it prints which folder (if any) is used for static files.
+
+### Threads
+
+With `threaded=True` (the default) a slow request, such as a big table
+export or a call to another service, no longer makes everyone else wait.
+At most `app.max_threads` requests (default 32) run at once; more wait in line.
+
+The framework's own code is safe with threads: every query opens its own
+database connection, login lockout counting and TableViewer edits run one at a
+time, and the TLS handshake (with `useHttps`) happens in each request's own thread.
+
+**Your own handlers** may now run at the same time as each other. That only
+matters if they share something in Python memory:
+
+```python
+counter = 0
+
+@app.route('POST', '/api/next-number')
+def next_number(request):
+    global counter
+    counter += 1          # two requests at once can both read the same value
+    send_json(request, 200, {"n": counter})
+```
+
+Guard such state with a lock, or keep it in the database:
+
+```python
+import threading
+counter_lock = threading.Lock()
+
+@app.route('POST', '/api/next-number')
+def next_number(request):
+    global counter
+    with counter_lock:
+        counter += 1
+        n = counter
+    send_json(request, 200, {"n": n})
+```
+
+Handlers that only read the request, query the database and send a response
+(almost all of them) need nothing. If an app can't be made safe, pass
+`WebServer(port=8080, threaded=False)`.
+
+A client that goes quiet for 30 seconds in the middle of a request is
+disconnected, in both modes, so it can't hold the server.
 
 ---
 
@@ -229,7 +275,8 @@ for the built-in event names.
 
 ## `app.start()`
 
-Start listening. Blocks until Ctrl+C. Always the last call.
+Start listening. Blocks until Ctrl+C. Always the last call. The startup line
+says whether the server is threaded (`(32 threads)`) or `(single-threaded)`.
 
 ---
 

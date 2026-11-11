@@ -4,11 +4,13 @@ This is the part of WebServer that exists regardless of which features
 (auth, TableViewer, ...) a consumer actually turns on.
 """
 
-from http.server import HTTPServer
+from http.server import HTTPServer, ThreadingHTTPServer
 import os
+import ssl
 import sys
+import threading
 
-from WebServer.WebHandler import WebHandler
+from WebServer.WebHandler import REQUEST_TIMEOUT, WebHandler
 from WebServer.database import createConnection, get_connection, create_tables
 
 DEFAULT_CSP = (
@@ -24,12 +26,54 @@ DEFAULT_CSP = (
 )
 
 
+class _ThreadedServer(ThreadingHTTPServer):
+    """One thread per request, at most ``max_threads`` at a time.
+
+    With TLS the handshake also happens in the request's own thread, so a slow
+    or stalled client can't hold up the loop that accepts everyone else.
+    """
+
+    daemon_threads = True        # Ctrl+C stops the server without waiting for open requests
+    request_queue_size = 64      # connections waiting while all threads are busy
+
+    def __init__(self, address, handler, max_threads, ssl_context=None):
+        super().__init__(address, handler)
+        self._slots = threading.BoundedSemaphore(max_threads)
+        self.ssl_context = ssl_context
+
+    def process_request(self, request, client_address):
+        # Wait for a free thread. A timeout loop rather than a plain acquire()
+        # so Ctrl+C still gets through on Windows while every thread is busy.
+        while not self._slots.acquire(timeout=0.5):
+            pass
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            if self.ssl_context is not None:
+                request.settimeout(REQUEST_TIMEOUT)
+                try:
+                    request = self.ssl_context.wrap_socket(request, server_side=True)
+                except (ssl.SSLError, OSError):
+                    self.shutdown_request(request)   # failed or abandoned handshake
+                    return
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 class ServerMixin:
     """Construction, routing, TLS, database wiring, and serve_forever()."""
 
-    def __init__(self, host="127.0.0.1", port=8000, static_dir: str = None):
+    def __init__(self, host="127.0.0.1", port=8000, static_dir: str = None, threaded=True):
         self.host = host
         self.port = port
+        self.threaded = bool(threaded)
+        self.max_threads = 32                    # requests handled at the same time when threaded
         self.routes = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
         self.auth = None
         self.certfile = None
@@ -180,7 +224,18 @@ class ServerMixin:
     def start(self):
         """Boots the server."""
         self._register_asset_alias_routes()
-        server = HTTPServer((self.host, self.port), WebHandler)
+        context = None
+        if self.certfile:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(self.certfile, self.keyfile)
+
+        if self.threaded:
+            server = _ThreadedServer((self.host, self.port), WebHandler, self.max_threads, ssl_context=context)
+        else:
+            server = HTTPServer((self.host, self.port), WebHandler)
+            if context:
+                server.socket = context.wrap_socket(server.socket, server_side=True)
         server.routes = self.routes
         server.auth = self.auth
         server.static_dir = self.static_dir
@@ -193,16 +248,9 @@ class ServerMixin:
         server.security_headers = self._security_headers
         server.max_body_bytes = self.max_body_bytes
 
-        scheme = "http"
-        if self.certfile:
-            import ssl
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(self.certfile, self.keyfile)
-            server.socket = context.wrap_socket(server.socket, server_side=True)
-            scheme = "https"
-
-        print(f"[ web_framework ] Secure Internal Server running on {scheme}://{self.host}:{self.port}")
+        scheme = "https" if context else "http"
+        mode = f"{self.max_threads} threads" if self.threaded else "single-threaded"
+        print(f"[ web_framework ] Secure Internal Server running on {scheme}://{self.host}:{self.port} ({mode})")
         print("[ web_framework ] Press Ctrl+C to stop.")
         try:
             server.serve_forever()
