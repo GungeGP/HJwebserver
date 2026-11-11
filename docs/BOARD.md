@@ -30,7 +30,7 @@ eller nummeret på den rapport opgaven kom af.>
 
 | Emne |
 |---|
-| Få Microsoft-login og trådning, der ligger ucommittet på standardgrenen, over på en gren og gennemgået |
+| Få Microsoft-login, der ligger ucommittet på standardgrenen, over på en gren og gennemgået |
 | Flyt forretningsspecifikke værdier — databasenavn, tabel- og kolonnenavne, maildomæne — ud af eksempelappen og dokumentationen |
 | Lav en testsuite i projektet, startende med de midlertidige test af login og samtidighed |
 | Skriv README'en om på dansk til dem der bruger og driver rammeværket |
