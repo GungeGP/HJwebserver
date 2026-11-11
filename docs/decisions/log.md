@@ -10,6 +10,21 @@ Her hører også **afvisninger**: et fund der ikke bliver en opgave, skal have s
 
 | Dato | Nr. | Beslutning | Begrundelse | Rolle |
 |---|---|---|---|---|
+| 2026-11-11 | task-0006 | Fundet om at `.env` nævner `docs/` bliver ikke en opgave; mennesket retter selv sin `.env` | `.env` er menneskets og må ikke læses af rollerne. Linjerne er de `MS_*`-pladsholdere med en henvisning til `docs/SignInForm.md`, som blev tilføjet før skiftet til Authentik | architect |
+| 2026-11-11 | — | Tavlen gendannet i `docs/` ved siden af `guide/` | task-0006 har adskilt dokumentationen fra arbejdsfilerne | architect |
+| 2026-11-11 | task-0006 | Opgaven er afsluttet: bygget | Alle kriterier holder. Linktjek: 57 links, 0 brudte, efter at architect rettede README-linkene | architect |
+| 2026-11-11 | task-0006 | Rækkefølge: task-0006 bygges før task-0007, så menuens dokumentationsside lægges i `docs/guide/` fra start. Ingen af dem sendes af sted før task-0001's kode er på `main` | Menneskets valg om rækkefølgen. task-0001's commits (`edd0a66`–`aeed6fe`) er ikke merget; dokumentationen der skal flyttes, og rollerne menuen bygger på, kommer derfra | architect |
+| 2026-11-11 | task-0007 | "Logget ind som" viser rollen | Som på menneskets skærmbillede | architect |
+| 2026-11-11 | task-0007 | Skjulte punkter som standard; `denied="disable"` viser dem nedtonet | Mennesket bad om både skjult og deaktiveret; skjult er det sikre udgangspunkt | architect |
+| 2026-11-11 | task-0007 | Alle sider får menuen når den er slået til; `menu=False` på `addPath` fravælger den | En side uden for menuen, fx en sagsside, skal stadig have navigationen | architect |
+| 2026-11-11 | task-0007 | `sidebar=False` med punkterne tilgængelige i siden er med fra start | Egen navigation får rollefiltrering og tal uden at gentage reglerne | architect |
+| 2026-11-11 | task-0007 | Admin-knappen fører til en tom side, som appens egen `/admin` erstatter; ingen indbyggede admin-værktøjer | Menneskets valg: der skal være bygget til det, ikke mere | architect |
+| 2026-11-11 | task-0007 | `count=` peger på en adresse der svarer med tallet | Siden bliver ikke langsommere; adressen kan have roller. Python-funktion i menuen afvist | architect |
+| 2026-11-11 | task-0007 | Almindelige sideskift; serveren sætter menuen ind i hver side | Sidernes scripts virker uændret. Indholdsskift med JavaScript afvist. Mennesket: prøv det, ellers tag det derfra | architect |
+| 2026-11-11 | task-0007 | Menupunkter peger på `addPath`-sider; roller kun på siden; start nægtes ved ukendt adresse | Én måde at lave en side på; menu og adgang kan ikke komme ud af trit | architect |
+| 2026-11-11 | task-0007 | Menuen og dens punkter defineres i `app.menu(...)` | Menneskets krav | architect |
+| 2026-11-11 | — | Ingen nye grene for nu; opgaver bygges på `main`. Afviger fra kontraktens én gren pr. opgave | Menneskets valg | architect |
+| 2026-11-11 | — | Mennesket committer, merger og pusher selv; ingen rolle kører de linjer, og ingen commit får en `Co-Authored-By`-linje. Afviger fra kontraktens trin 8 | Menneskets valg | architect |
 | 2026-11-11 | — | Tavlen gendannes først når task-0006 er bygget, og gemmer imens sin tilstand her: task-0001 afsluttet; task-0002 til task-0006 planlagt; emner: forretningsværdier ud af eksempelapp og docs, testsuite, præferencer for database og logning, LF-linjeskift, lokale indstillinger og miljøfiler ude af git | Mennesket slettede tavlen fordi den lå blandt dokumentationen | architect |
 | 2026-11-11 | task-0006 | Rammeværkets dokumentation flyttes til `docs/guide/`; arbejdsfilerne bliver i `docs/` | Menneskets valg. At flytte arbejdsfilerne ud af `docs/` afvist: rollerne har stierne skrevet ind | architect |
 | 2026-11-11 | — | Emnet "Skriv README'en om på dansk til dem der bruger og driver rammeværket" afvises | Følger af beslutningen ovenfor | architect |

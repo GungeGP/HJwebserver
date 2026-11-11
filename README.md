@@ -7,15 +7,15 @@ with almost no code to write.
 
 ## Documentation
 
-The wiki lives in [`docs/`](docs/README.md):
+The wiki lives in [`docs/guide/`](docs/guide/README.md):
 
-- [Getting started](docs/README.md) - install, minimal app, project layout
-- [WebServer reference](docs/webserver.md) - every method and parameter (`setDatabase`, `settings`, `route`, ...)
-- [Routes & requests](docs/routes.md) - handlers, `request.body`, `request.user`, sending responses
-- [Database](docs/database.md) - backends, drivers, running your own queries
-- [Authentication](docs/auth.md) - login through Authentik, `.env`, public pages, local development mode
-- [Users and roles](docs/users.md) - roles from Authentik groups, `roleHierarchy`, the `audit` command
-- [Frontend](docs/frontend.md) - injected scripts, `hjAuth`, logout button, form token, `Notify`
+- [Getting started](docs/guide/README.md) - install, minimal app, project layout
+- [WebServer reference](docs/guide/webserver.md) - every method and parameter (`setDatabase`, `settings`, `route`, ...)
+- [Routes & requests](docs/guide/routes.md) - handlers, `request.body`, `request.user`, sending responses
+- [Database](docs/guide/database.md) - backends, drivers, running your own queries
+- [Authentication](docs/guide/auth.md) - login through Authentik, `.env`, public pages, local development mode
+- [Users and roles](docs/guide/users.md) - roles from Authentik groups, `roleHierarchy`, the `audit` command
+- [Frontend](docs/guide/frontend.md) - injected scripts, `hjAuth`, logout button, form token, `Notify`
 
 ## Install
 

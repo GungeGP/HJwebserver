@@ -6,7 +6,7 @@ Microsoft-login, og en TableViewer der viser og redigerer tabeller i en side.
 En app skrives som en `main.py` der importerer `WebServer`. `main.py` i roden er
 en eksempelapp, ikke en del af rammeværket.
 
-Procesregler står i `AGENTS.md`. Brugerdokumentationen til rammeværket står i `docs/` (se `docs/README.md`).
+Procesregler står i `AGENTS.md`. Brugerdokumentationen til rammeværket står i `docs/guide/` (se `docs/guide/README.md`).
 
 ## Stak
 
@@ -52,7 +52,8 @@ python -m venv .venv
 | `WebServer/WebHandler.py` | Hver forespørgsel: rute, adgangskontrol, body-parsing, statiske filer |
 | `WebServer/public/` | Rammeværkets egne js- og css-filer. En app kan overskrive hver af dem med en fil af samme navn i sin egen `public/` |
 | `WebServer/__main__.py` | CLI til brugere, roller, sessioner, lockouts og audit |
-| `docs/` | Brugerdokumentation (engelsk), designdokumentet `SignInForm.md`, og kontraktens mapper |
+| `docs/guide/` | Brugerdokumentation til rammeværket (engelsk) og designdokumentet `SignInForm.md` |
+| `docs/` | `README.md` (oversigt over mappen) og kontraktens arbejdsfiler: `BOARD.md`, `decisions/`, `tasks/`, `tests/`, `securities/`, `reviews/`, `debugs/` |
 | `main.py`, `public/` | Eksempelappen og dens sider |
 
 **Én funktion, ét modul pr. lag.** Login findes som `core/auth.py` (metoderne på `app`), `auth.py` (motoren) og `database/auth.py` (SQL'en). TableViewer følger samme deling. Ny funktionalitet lægges på samme måde.
