@@ -16,6 +16,7 @@ The wiki lives in [`docs/guide/`](docs/guide/README.md):
 - [Authentication](docs/guide/auth.md) - login through Authentik, `.env`, public pages, local development mode
 - [Users and roles](docs/guide/users.md) - roles from Authentik groups, `roleHierarchy`, the `audit` command
 - [Frontend](docs/guide/frontend.md) - injected scripts, `hjAuth`, logout button, form token, `Notify`
+- [Side menu](docs/guide/menu.md) - `app.menu(...)`: a menu on the left of every page, items hidden by role, Admin button
 
 ## Install
 

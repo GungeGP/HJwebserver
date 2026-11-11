@@ -161,7 +161,7 @@ Raises `FileNotFoundError` if either file is missing.
 
 ---
 
-## `app.addPath(url_path, file_path, public=False, roles=None)`
+## `app.addPath(url_path, file_path, public=False, roles=None, menu=True)`
 
 Serve one file at a fixed URL.
 
@@ -171,6 +171,7 @@ Serve one file at a fixed URL.
 | `file_path` | File to send, relative to the project root, e.g. `'public/index.html'`. |
 | `public` | When auth is on: `True` makes this page viewable without a user from Authentik. |
 | `roles` | List of roles allowed to view it, e.g. `["admin"]`. Others get `403`. |
+| `menu` | `False` leaves the [side menu](menu.md) out of this page. No effect without `app.menu(...)`. |
 
 ```python
 app.addPath('/', 'public/index.html')
@@ -180,6 +181,25 @@ app.addPath('/admin', 'public/admin.html', roles=["admin"])
 
 HTML files get the framework scripts injected. Other files are sent as-is with a
 content type guessed from the extension.
+
+---
+
+## `app.menu(items, title=None, showUser=True, admin=True, sidebar=True)`
+
+A menu on the left of every page, pointing to pages made with `addPath`.
+Items the user may not open are hidden. See [Side menu](menu.md).
+
+```python
+from WebServer import WebServer, MenuItem
+
+app.menu(title="Ophold", items=[
+    MenuItem("§ 109", "/p109", desc="Ophold på kvindekrisecenter", count="/api/p109/antal"),
+    MenuItem("Stamdata", "/stamdata", items=[MenuItem("Tilbud", "/stamdata/tilbud")]),
+])
+```
+
+Refuses to start (at `start()`) when an item points to an address with no page,
+or, with `auth=True`, when `roleHierarchy` has no `admin` and `admin` isn't `False`.
 
 ---
 

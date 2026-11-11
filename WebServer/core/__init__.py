@@ -5,6 +5,7 @@
   * assets.py       - the framework's own bundled js/css assets
   * auth.py         - settings(auth=...) and user/session/audit management
   * tableviewer.py  - addTableViewer() (pairs with WebServer.database.tableviewer)
+  * menu.py         - menu() (pairs with WebServer.menu)
 
 WebServer/__init__.py composes these as mixins into a single WebServer class,
 so from a consumer's point of view nothing here is visible or changes - it's

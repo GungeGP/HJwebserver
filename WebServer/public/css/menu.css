@@ -1,0 +1,136 @@
+/* Side menu (app.menu). Override the whole file with public/css/menu.css in the app. */
+
+:root {
+    --hj-menu-width: 260px;
+    --hj-menu-narrow: 76px;
+    --hj-menu-green: #00563B;
+    --hj-menu-green-dark: #153e2c;
+    --hj-menu-orange: #e8772e;
+    --hj-menu-bg: #f4f7f5;
+    --hj-menu-line: #dfe7e2;
+    --hj-menu-text: #2C3531;
+    --hj-menu-muted: #6b7570;
+}
+
+/* The page's own content sits to the right of the menu. */
+body:has(> .hj-menu) { margin-left: var(--hj-menu-width); transition: margin-left 0.15s ease; }
+body:has(> .hj-menu.collapsed) { margin-left: var(--hj-menu-narrow); }
+
+.hj-menu {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000;
+    width: var(--hj-menu-width); box-sizing: border-box;
+    display: flex; flex-direction: column;
+    background: var(--hj-menu-bg); border-right: 1px solid var(--hj-menu-line);
+    color: var(--hj-menu-text);
+    font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif; font-size: 14px; line-height: 1.3;
+    transition: width 0.15s ease;
+}
+.hj-menu.collapsed { width: var(--hj-menu-narrow); }
+.hj-menu *, .hj-menu *::before { box-sizing: border-box; }
+
+/* --- head: title and the «/» button --- */
+.hj-menu-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px 12px 12px 16px; border-bottom: 1px solid var(--hj-menu-line);
+}
+.hj-menu-title {
+    flex: 1; min-width: 0; font-size: 18px; font-weight: 600; color: var(--hj-menu-green-dark);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hj-menu-toggle {
+    margin-left: auto; flex: none; width: 30px; height: 30px; padding: 0;
+    border: 1px solid var(--hj-menu-line); border-radius: 6px; background: #fff;
+    color: var(--hj-menu-green-dark); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.hj-menu-toggle:hover { border-color: var(--hj-menu-green); }
+.hj-menu.collapsed .hj-menu-head { justify-content: center; padding: 16px 0 12px; }
+.hj-menu.collapsed .hj-menu-title { display: none; }
+.hj-menu.collapsed .hj-menu-toggle { margin-left: 0; }
+
+/* --- the items --- */
+.hj-menu-items { flex: 1; overflow-y: auto; margin: 0; padding: 10px 8px; list-style: none; }
+.hj-menu-sub { margin: 2px 0 4px; padding: 0 0 0 14px; list-style: none; display: none; }
+.hj-menu-item.open > .hj-menu-sub { display: block; }
+.hj-menu-item { margin: 2px 0; }
+
+.hj-menu-row { display: flex; align-items: stretch; }
+.hj-menu-row > .hj-menu-link { flex: 1; min-width: 0; }
+
+.hj-menu-link {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 6px;
+    color: inherit; text-decoration: none;
+}
+a.hj-menu-link:hover { background: #e6eee9; }
+.hj-menu-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hj-menu-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hj-menu-desc {
+    font-size: 12px; color: var(--hj-menu-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hj-menu-short { display: none; }
+
+/* The number from count=, in a small box to the right. */
+.hj-menu-count {
+    flex: none; min-width: 26px; padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--hj-menu-line); background: #fff;
+    font-size: 12px; font-weight: 600; text-align: center; color: var(--hj-menu-green-dark);
+}
+.hj-menu-count[hidden] { display: none; }
+
+/* The page you are on. */
+.hj-menu-item.active > .hj-menu-link,
+.hj-menu-item.active > .hj-menu-row > .hj-menu-link { background: var(--hj-menu-green); color: #fff; }
+.hj-menu-item.active > .hj-menu-link .hj-menu-desc,
+.hj-menu-item.active > .hj-menu-row > .hj-menu-link .hj-menu-desc { color: rgba(255, 255, 255, 0.8); }
+.hj-menu-item.active > .hj-menu-link .hj-menu-count,
+.hj-menu-item.active > .hj-menu-row > .hj-menu-link .hj-menu-count {
+    background: var(--hj-menu-green-dark); border-color: var(--hj-menu-green-dark); color: #fff;
+}
+
+/* denied="disable": greyed out, not clickable. */
+.hj-menu-item.disabled > .hj-menu-link,
+.hj-menu-item.disabled > .hj-menu-row > .hj-menu-link { opacity: 0.45; cursor: not-allowed; }
+
+/* The arrow that folds sub-items. */
+.hj-menu-arrow {
+    flex: none; width: 28px; margin-left: 2px; padding: 0;
+    border: none; border-radius: 6px; background: none; color: var(--hj-menu-muted); cursor: pointer;
+}
+.hj-menu-arrow:hover { background: #e6eee9; }
+.hj-menu-arrow::before {
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg); transition: transform 0.15s ease;
+}
+.hj-menu-item.open > .hj-menu-row > .hj-menu-arrow::before { transform: rotate(45deg); }
+
+/* --- narrow form: the short names --- */
+.hj-menu.collapsed .hj-menu-items { padding: 10px 6px; }
+.hj-menu.collapsed .hj-menu-text { display: none; }
+.hj-menu.collapsed .hj-menu-short {
+    display: block; flex: 1; min-width: 0; text-align: center; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hj-menu.collapsed .hj-menu-link { flex-direction: column; gap: 3px; padding: 8px 2px; }
+.hj-menu.collapsed .hj-menu-count { min-width: 0; padding: 0 4px; font-size: 11px; }
+.hj-menu.collapsed .hj-menu-arrow { display: none; }
+.hj-menu.collapsed .hj-menu-sub { padding-left: 0; }
+
+/* --- foot: the Admin button and who is logged in --- */
+.hj-menu-foot { padding: 12px 16px 16px; border-top: 1px solid var(--hj-menu-line); }
+.hj-menu-admin-label {
+    margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--hj-menu-muted);
+}
+.hj-menu-admin {
+    display: block; padding: 8px 10px; border-radius: 6px; text-align: center;
+    background: var(--hj-menu-orange); color: #fff; font-weight: 600; text-decoration: none;
+}
+.hj-menu-admin:hover, .hj-menu-admin.active { background: #c95f1b; }
+.hj-menu-user { margin-top: 10px; font-size: 12px; color: var(--hj-menu-muted); }
+.hj-menu-user strong { color: var(--hj-menu-text); }
+.hj-menu.collapsed .hj-menu-foot { padding: 12px 6px 16px; }
+.hj-menu.collapsed .hj-menu-admin-label,
+.hj-menu.collapsed .hj-menu-user { display: none; }
+.hj-menu.collapsed .hj-menu-admin { padding: 8px 2px; font-size: 12px; }

@@ -225,6 +225,7 @@ class ServerMixin:
     def start(self):
         """Boots the server."""
         self._register_asset_alias_routes()
+        self._menu_on_start()   # menu addresses, the admin role, the empty /admin page
         if self.auth:
             from WebServer.auth import on_server_start
             on_server_start(self.routes)   # role checks, audit cleanup, public paths for Authentik
@@ -247,6 +248,7 @@ class ServerMixin:
         server.package_public_dir = self.package_public_dir
         server.can_serve_static_js = self.can_serve_static_js
         server.get_inject_js_urls = self.get_inject_js_urls
+        server.add_menu = self.add_menu
         server.resolve_user = self._resolve_user
         server.security_headers = self._security_headers
         server.max_body_bytes = self.max_body_bytes

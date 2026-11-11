@@ -10,10 +10,11 @@ from WebServer.FileHandler import handle_file_request
 class FileHandlerMixin:
     """addPath() - the only method this feature adds."""
 
-    def addPath(self, url_path, file_path, public=False, roles=None):
+    def addPath(self, url_path, file_path, public=False, roles=None, menu=True):
         """Maps a URL to ANY file, safely resolving the path.
 
         When auth is enabled the page requires login unless public=True.
         roles=["admin"] restricts it to users with one of those roles.
+        menu=False leaves the side menu (app.menu) out of this page.
         """
-        self.routes = handle_file_request(self, url_path, file_path, public=public, roles=roles)
+        self.routes = handle_file_request(self, url_path, file_path, public=public, roles=roles, menu=menu)

@@ -1,7 +1,7 @@
 ---
 nummer: task-0007
 titel: Sidemenu som app-udvikleren slår til i main.py
-status: planlagt
+status: afsluttet
 kilde: interview
 oprettet: 2026-11-11
 ---
@@ -137,5 +137,98 @@ task-0001 — rollerne og brugeren kommer derfra, og dens kode skal være på `m
 developer, som aldrig retter i definitionen ovenfor.>
 
 ### Hvad er lavet
+
+Bygget på `main` uden commits, jf. beslutningsloggen. Alt ligger i arbejdstræet.
+
+**Filer**
+
+- `WebServer/menu.py` (ny): motoren. `MenuItem(title, url, short=None, desc=None, count=None, items=None, denied="hide")`, og `Menu` med tjekket ved start (`check`), punkterne for én bruger og én side (`items_for`) og den markup der sættes ind (`render`). Al tekst escapes med `html.escape`. JSON'en escaper `<`, `>` og `&` som `\u003c`, `\u003e` og `\u0026`.
+- `WebServer/core/menu.py` (ny): `MenuMixin` med `menu(items, title=None, showUser=True, admin=True, sidebar=True)`, `_menu_on_start()` (tjek og tom `/admin`) og `add_menu(content, request)`. `menu()` registrerer også ruterne `/js/menu.js` og `/css/menu.css`. Det sker først dér, så en app uden menu hverken får nye ruter eller nye offentlige stier til Authentik.
+- `WebServer/__init__.py`: `MenuMixin` er sat på `WebServer`, og `MenuItem` eksporteres (`from WebServer import WebServer, MenuItem`).
+- `WebServer/page.py`: ny `inject_menu(content, markup)` sætter markup ind lige efter `<body ...>`. En fil uden `<body>` (en partial) røres ikke.
+- `WebServer/FileHandler.py` og `WebServer/core/filehandler.py`: `addPath(..., menu=True)`. `menu=False` udelader menuen. Ingen anden ændring af `addPath`.
+- `WebServer/WebHandler.py`: HTML-filer der serveres direkte fra `public/`, får også menuen.
+- `WebServer/core/server.py`: `start()` kalder `_menu_on_start()` før auth-tjekkene, og serveren får `add_menu`.
+- `WebServer/core/assets.py`: `menu.js` står i `_CONDITIONAL_ASSETS` (kun når `app.menu` er kaldt), og `/public/js/menu.js` og `/public/css/menu.css` er tilføjet som aliaser.
+- `WebServer/public/js/menu.js` (ny): `window.hjMenu.items`, sammenklapning (`localStorage`, nøglen `hj:menu-collapsed`), pilene og tallene. Tallene hentes efter `load`, og kun et endeligt JSON-tal vises.
+- `WebServer/public/css/menu.css` (ny): udseendet. Aktivt punkt i mørk grøn `#00563B` (samme grøn som `auth.css`), orange Admin-knap, tallet i en lille boks til højre for punktet, `«`/`»` øverst og korte navne i den smalle udgave.
+- `docs/guide/menu.md` (ny): siden om menuen, med alle eksemplerne fra opgaven.
+- `docs/guide/frontend.md`: `menu.js` står i listen over indsatte scripts, `menu.css` er nævnt, og der er et nyt afsnit "Side menu" med link.
+- `docs/guide/webserver.md`: `menu=` er med i `addPath`-tabellen, og der er et nyt afsnit om `app.menu(...)`.
+- `docs/guide/README.md`: en ny række, "Side menu", i sidetabellen.
+
+**Holdt op mod Færdig når.** Efterprøvet med HTTP-kald mod en testapp i udviklingstilstand og i proxy-tilstand, på SQLite i en midlertidig mappe. 92 påstande holdt.
+
+| Kriterium | Efterprøvet |
+|---|---|
+| Uden `app.menu` er alt som i dag | Samme app er kørt mod `HEAD` (udtrukket med `git archive`) og mod arbejdstræet, med og uden `auth=True`. Rutetabel, offentlige stier og sidernes bytes var identiske. Ingen `menu.js`, ingen `/admin`. |
+| Menu på alle sider, `menu=False` | Menuen står lige efter `<body>` på `addPath`-sider, på HTML fra `public/` og på den tomme `/admin`. En side med `menu=False` har ingen menu, men får stadig scripts. |
+| Titel | Titlen vises når den er sat. Uden titel er der intet titelelement. |
+| Beskrivelse | `hj-menu-desc` står under titlen. |
+| Tal | Tælleradressen står som `data-hj-count` og hentes af `menu.js`. Om tallet faktisk vises i browseren, er ikke efterprøvet (se nedenfor). |
+| Underpunkter | Et overpunkt har sit eget link og en pil. Det står `open` på sin egen side og på underpunkternes, ellers lukket. |
+| Aktivt punkt | Punktet har `active` og `aria-current="page"`, og der er kun ét pr. side. På `/admin` er det Admin-knappen. |
+| Skjult/nedtonet | `user` ser ikke Kommuner, hverken i menuen eller i JSON. Med `denied="disable"` står punktet som `<span aria-disabled>` uden link og uden tal. |
+| Admin-knap | Vises for `admin`, ikke for `user` og ikke uden auth. Den tomme `/admin` giver 200 for admin, 403 for user og 404 uden auth eller med `admin=False`. En apps egen `/admin` bruges i stedet. |
+| Start nægtes | Start nægtes med en roleHierarchy uden `admin`: `RuntimeError: app.menu: the Admin button is for the role 'admin', which is not in roleHierarchy. Add 'admin' to roleHierarchy in app.settings(), or pass app.menu(..., admin=False).` Med `admin=False` starter den. |
+| "Logget ind som" | Linjen `Logget ind som <strong>admin</strong>` står der. Med `showUser=False` er den væk, og uden auth står den ikke. |
+| `sidebar=False` | Ingen `<nav>` og ingen css. JSON'en har nøglerne `title, url, desc, short, count, active, disabled, items`, `active` følger siden, og `menu.js` er sat ind. |
+| Ukendt adresse | Start nægtes: `RuntimeError: app.menu: no page is registered at /findes-ikke (menu item 'Findes ikke'). Register it with app.addPath('/findes-ikke', ...) or fix the address.` |
+| Almindelige sideskift, TableViewer og kalender | Menupunkterne er almindelige `<a href>`. TableViewer-siden og kalendersiden får menuen og deres egne scripts, og TableViewers dataroute svarer. Intet i rammeværkets øvrige scripts afhænger af `<body>`s første barn. Dialogen bruger `<dialog>`, som ligger over menuen. |
+| Ligner skærmbillederne, `public/css/menu.css` | CSS'en er skrevet efter beskrivelsen. Overskrivning sker med samme mekanisme som de andre filer (`_register_asset_route`). Udseendet er ikke efterprøvet. |
+| Ingen HTML-indsættelse | En titel `<b>Kalender</b>`, en beskrivelse `"><script>alert(1)</script>`, et kort navn `<i>` og en menutitel `Ophold & <co>` vises escaped. JSON'en indeholder intet rå `<` eller `>`. |
+| Dokumentation | `docs/guide/menu.md` med eksemplerne. Linktjek: 63 links, 0 brudte. |
+
+Proxy-tilstand er også efterprøvet. Et kald uden nøgle får 403. På en offentlig side uden bruger viser menuen kun det offentlige punkt. Med Authentik-headere for en admin vises alle punkter.
+
+**Linje til projektets README** (dokumentationslisten, efter Frontend):
+
+```
+- [Side menu](docs/guide/menu.md) - `app.menu(...)`: a menu on the left of every page, items hidden by role, Admin button
+```
+
+**Nyt for brugeren:** `app.menu(items, title=None, showUser=True, admin=True, sidebar=True)`, `MenuItem(...)` (importeres fra `WebServer`), `addPath(..., menu=False)` og `hjMenu.items` i siden. Ingen nye nøgler i `.env`.
+
+**Sådan starter du testappen med flere roller.** Appen ligger uden for repoet, i
+`C:\Users\d1misgu\AppData\Local\Temp\claude\20b2dc0acb4a4de2\f7a70dfd-84be-46bf-8615-3170309b32ec\scratchpad\menuapp\main.py`.
+Den bruger udviklingstilstand og SQLite i `%TEMP%`. Kør fra projektroden i PowerShell:
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+$env:JWT_SECRET = .venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
+$env:TEST_ROLE = "admin"
+.venv\Scripts\python.exe C:\Users\d1misgu\AppData\Local\Temp\claude\20b2dc0acb4a4de2\f7a70dfd-84be-46bf-8615-3170309b32ec\scratchpad\menuapp\main.py
+```
+
+Åbn `http://127.0.0.1:8091/p109`. Stop med Ctrl+C. Sæt så `$env:TEST_ROLE = "user"` og start igen for at se menuen som `user`.
+
+| Variabel | Værdi | Viser |
+|---|---|---|
+| `TEST_ROLE` | `admin` | Alle punkter, Admin-knappen og "Logget ind som admin" |
+| `TEST_ROLE` | `user` | Uden Kommuner og uden Admin-knap |
+| `TEST_ROLE` | `none` | Uden `auth=True`: alle punkter, ingen Admin-knap, ingen "Logget ind som" |
+| `TEST_VARIANT` | `disable` | Kommuner nedtonet for `user` |
+| `TEST_VARIANT` | `notitle`, `nouser`, `noadmin`, `nosidebar`, `ownadmin` | De tilsvarende valgmuligheder. Med `nosidebar` viser `/egen-nav` opgavens eget-nav-eksempel |
+
+Hvad der kan ses i testappen:
+
+- **Tal:** `/p109` viser tallet 12. `/p110`s adresse svarer med en tekst, så dér skal der ikke stå noget tal.
+- **TableViewer og kalender:** Kommuner (`/stamdata/kommuner`) har en TableViewer, og `/cal` har kalenderen.
+- **Escaping:** Det fjerde punkt og menutitlen indeholder med vilje `<b>`, `<script>` og `<co>`. De skal stå som tekst.
+- **`menu=False`:** `/` er en side uden menu.
+
 ### Hvad er ikke lavet, og hvorfor
+
+- **Udseende, sammenklapning, pilene og om tallene vises i browseren er ikke efterprøvet.** Det kræver en browser, og den starter en agent ikke (kontraktens `## Efterprøvning af en webflade`). Opgaven lægger det hos architect. HTML'en, ruterne og `menu.js`' syntaks (`node --check`) er efterprøvet.
+- **Hele suiten er ikke kørt.** Der findes ingen, og opgaven beder ikke om det. Der findes heller ingen linter i projektet. De ændrede Python-filer er kompileret med `py_compile`.
+- **Mit testapparat er ikke lagt i repoet:** testappen, `run_checks.py` og `compare_nomenu.py` i scratchpad-mappen. Opgaven beder ikke om en maskinel kontrol.
+
 ### Uklart
+
+1. **En offentlig side uden bruger.** På en side med `public=True` sætter `WebHandler` ikke `request.user`. Menuen spørger derfor selv `resolve_user` om brugeren (proxyens nøgle er allerede tjekket). Er der ingen logget ind, viser jeg kun punkter for offentlige sider; de øvrige skjules eller nedtones efter `denied`. Den anden mulighed var at vise dem, fordi Authentik ville bede om login ved klik.
+2. **`hj:ready` findes kun med `auth=True`.** Det godkendte eksempel med `sidebar=False` lytter på `hj:ready`, som `auth.js` sender. Uden auth sendes den aldrig. Jeg har ikke ændret `auth.js` (uden for opgaven). I stedet sættes `hjMenu` før `DOMContentLoaded`, og `menu.md` siger at man bruger `DOMContentLoaded` uden auth. Skal `menu.js` sende `hj:ready` når `auth.js` ikke er der, er det en ny beslutning.
+3. **`menu.css` linkes af serveren, ikke af `menu.js`.** Det afviger fra de andre stylesheets. Hvert klik i menuen er en hel sideindlæsning, og et stylesheet som scriptet sætter ind, blokerer ikke tegningen. Menuen ville derfor blinke ustylet ved hvert klik. `<link>` står lige før `<nav>`, så den kan stadig overskrives på samme måde. Af samme grund står der et lille inline-script efter `<nav>`, der klapper menuen sammen før første tegning. Med standard-CSP'en virker det (`'unsafe-inline'`). Med en strengere `csp=` blokeres det, og så klapper `menu.js` menuen sammen lidt senere: den blinker åben.
+4. **HTML-filer direkte fra `public/` får menuen og kan ikke fravælge den.** `menu=False` findes kun på `addPath`, og opgaven siger "ingen anden ændring". Filer uden `<body>`-tag får ingen menu, så partials er ikke ramt.
+5. **Kort navn uden `short=`:** de første fire tegn af titlen. Det tal er mit valg.
+6. **Danske tekster i rammeværket.** "Kun for administratorer" og "Logget ind som" står i opgaven og er brugt som de står. Knappernes hjælpetekster ("Klap menuen sammen", "Fold menuen ud", "Vis eller skjul underpunkter") har jeg også skrevet på dansk. Rammeværkets øvrige tekster er engelske (Dialogs `OK`/`Cancel`, TableViewers `Yes`/`No`).
+7. **Små valg i reglerne.** Et nedtonet punkt henter ikke sit tal: adressen er sandsynligvis lige så lukket som siden, og hver afvisning skrives i auditloggen. Er et overpunkt skjult, er dets underpunkter det også. Er et overpunkt nedtonet, vises underpunkterne efter deres egen regel. Underpunkter kan have egne underpunkter; tegningen er den samme for alle niveauer.

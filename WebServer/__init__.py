@@ -11,10 +11,12 @@ from WebServer.core.filehandler import FileHandlerMixin
 from WebServer.core.assets import AssetsMixin
 from WebServer.core.auth import AuthMixin
 from WebServer.core.tableviewer import TableViewerMixin
+from WebServer.core.menu import MenuMixin
+from WebServer.menu import MenuItem
 from WebServer.tableviewer import dateFilter, duration, selectFilter
 
 
-class WebServer(ServerMixin, FileHandlerMixin, AssetsMixin, AuthMixin, TableViewerMixin):
+class WebServer(ServerMixin, FileHandlerMixin, AssetsMixin, AuthMixin, TableViewerMixin, MenuMixin):
     """The clean interface your teammates will actually use.
 
     See WebServer/core/ for the implementation, split one feature per file:
@@ -23,4 +25,5 @@ class WebServer(ServerMixin, FileHandlerMixin, AssetsMixin, AuthMixin, TableView
       AssetsMixin        (core/assets.py)      - the framework's own bundled js/css assets
       AuthMixin          (core/auth.py)        - settings(auth=...), user/session/audit management
       TableViewerMixin   (core/tableviewer.py) - addTableViewer()
+      MenuMixin          (core/menu.py)        - menu()
     """

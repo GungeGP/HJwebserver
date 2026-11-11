@@ -4,7 +4,7 @@ import os
 from WebServer.page import inject_js_scripts, process_includes
 
 
-def handle_file_request(self, url_path, file_path, public=False, roles=None):
+def handle_file_request(self, url_path, file_path, public=False, roles=None, menu=True):
     safe_file_path = file_path.lstrip('/').lstrip('\\')
     absolute_path = os.path.join(self.base_dir, safe_file_path)
 
@@ -21,6 +21,8 @@ def handle_file_request(self, url_path, file_path, public=False, roles=None):
             if content_type == 'text/html':
                 include_root = self.static_dir or os.path.dirname(absolute_path)
                 content = process_includes(content, absolute_path, include_root)
+                if menu:
+                    content = self.add_menu(content, request)
                 inject_urls = getattr(self, 'get_inject_js_urls', lambda: [])()
                 content = inject_js_scripts(content, inject_urls, public=public)
 

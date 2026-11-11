@@ -10,6 +10,7 @@ tags inserted just before `</body>`:
 <script src="/js/Dialog.js?v=…"></script>
 <script src="/js/calender.js?v=…"></script>
 <script src="/js/auth.js?v=…"></script>   <!-- only when auth is on -->
+<script src="/js/menu.js?v=…"></script>   <!-- only once app.menu() is called -->
 <script src="/js/TableViewer.js?v=…"></script>   <!-- only once addTableViewer() is used -->
 ```
 
@@ -19,7 +20,14 @@ You can override any of these by putting your own copy at the same relative path
 under your `public/` folder (`public/js/auth.js`, `public/css/Dialog.css`, ...); the
 framework serves yours instead of its bundled copy. Stylesheets
 (`css/TableViewer.css`, `css/Dialog.css`, `css/calender.css`) are linked at
-runtime by their matching script, not injected server-side.
+runtime by their matching script, not injected server-side. The exception is
+`css/menu.css`, which the server links next to the menu itself, so the menu
+never shows unstyled.
+
+## Side menu
+
+`app.menu(...)` puts a menu on the left of every page, with items hidden from
+users who may not open them. See [Side menu](menu.md).
 
 ## Shared header, footer, navigation — includes
 

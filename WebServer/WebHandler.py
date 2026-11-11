@@ -248,6 +248,8 @@ class WebHandler(BaseHTTPRequestHandler):
 
                 if content_type == 'text/html':
                     content = process_includes(content, file_path, self.server.static_dir)
+                    if hasattr(self.server, 'add_menu'):
+                        content = self.server.add_menu(content, self)
                     if hasattr(self.server, 'get_inject_js_urls'):
                         content = inject_js_scripts(content, self.server.get_inject_js_urls())
                     file_path = None

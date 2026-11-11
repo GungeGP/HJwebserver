@@ -1,5 +1,5 @@
 """The framework's own bundled js/css assets (auth.js, webserver.js,
-TableViewer.js/css) - serving them, overriding them, and the auto-discovery
+TableViewer.js/css, menu.js/css) - serving them, overriding them, and the auto-discovery
 that injects the js ones into every served page.
 
 Not to be confused with addPath() (core/filehandler.py), which serves a
@@ -17,6 +17,7 @@ import os
 _CONDITIONAL_ASSETS = {
     'auth.js': lambda server: bool(server.auth),
     'TableViewer.js': lambda server: server.table_viewer_enabled,
+    'menu.js': lambda server: server.menu_config is not None,
 }
 
 
@@ -119,6 +120,6 @@ class AssetsMixin:
         get_routes = self.routes.setdefault('GET', {})
         for url_path in ('/js/auth.js', '/js/webserver.js', '/js/TableViewer.js', '/js/Dialog.js',
                           '/js/calender.js', '/css/TableViewer.css', '/css/auth.css', '/css/Dialog.css',
-                          '/css/calender.css'):
+                          '/css/calender.css', '/js/menu.js', '/css/menu.css'):
             if url_path in get_routes:
                 get_routes[f'/public{url_path}'] = get_routes[url_path]

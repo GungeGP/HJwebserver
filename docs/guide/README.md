@@ -15,6 +15,7 @@ connection and — behind Authentik — who is logged in.
 | [Authentication](auth.md) | Login via Authentik: `.env`, Authentik and the proxy, protecting routes, the form token |
 | [Users and roles](users.md) | Roles from Authentik groups, and the audit log on the command line |
 | [Frontend](frontend.md) | Shared header/footer includes, `hjAuth`, `Notify` |
+| [Side menu](menu.md) | `app.menu(...)`: a menu on the left of every page, filtered by role |
 | [TableViewer](tableviewer.md) | Database tables in a page: search, filters, lookups, related tables, editing |
 
 ## Getting started

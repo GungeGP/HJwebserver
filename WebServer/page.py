@@ -1,5 +1,5 @@
 """HTML page transforms applied to every page the framework serves: server-
-side includes and framework script injection. Shared by WebHandler.py (the
+side includes, the side menu, and framework script injection. Shared by WebHandler.py (the
 static-directory fallback) and FileHandler.py (addPath's explicit routes) so
 a page served either way gets identical treatment - previously each one had
 its own copy of inject_js_scripts(), and the two had already drifted.
@@ -9,6 +9,7 @@ import os
 import re
 
 INCLUDE_RE = re.compile(rb'<!--#include\s+(?:file|virtual)="([^"]+)"\s*-->')
+BODY_RE = re.compile(rb'<body\b[^>]*>', re.IGNORECASE)
 MAX_DEPTH = 5
 
 
@@ -78,3 +79,15 @@ def inject_js_scripts(content, urls, public=False):
     if idx != -1:
         return content[:idx] + injection + content[idx:]
     return content + injection
+
+
+def inject_menu(content, markup):
+    """Insert the side menu's markup (bytes) right after the <body> tag.
+
+    See core/menu.py's add_menu() for what the markup is. A file without a
+    <body> tag (a partial served on its own) is left unchanged.
+    """
+    match = BODY_RE.search(content)
+    if not match or not markup:
+        return content
+    return content[:match.end()] + markup + content[match.end():]

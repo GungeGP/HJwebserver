@@ -21,7 +21,6 @@ en rapport der har stået her i dagevis, er et fund på vej til at blive glemt.>
 
 | Nr. | Titel | Status | Kilde |
 |---|---|---|---|
-| task-0007 | Sidemenu som app-udvikleren slår til i main.py | planlagt | interview |
 | task-0002 | Rammeforbud på alle svar bag Authentik | planlagt | interview |
 | task-0003 | Fjern resterne af det gamle login | planlagt | interview |
 | task-0004 | Læs .env fra appens mappe | planlagt | interview |
@@ -50,6 +49,8 @@ ellers fyldes `docs/tasks/` med halve idéer.>
 |---|---|---|
 | task-0001 | Login via Authentik i stedet for appens eget login | bygget |
 | task-0006 | Rammeværkets dokumentation i sin egen mappe | bygget |
+| task-0007 | Sidemenu som app-udvikleren slår til i main.py | bygget |
+| task-0008 | Menuens udseende som skærmbillederne | afvist |
 
 <`Udfald` er `bygget` eller `afvist`. Flyt hertil når architect har vurderet
 opgaven — ikke når udrulningen er sket; udrulning er ikke en status.

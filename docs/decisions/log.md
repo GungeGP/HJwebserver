@@ -10,6 +10,16 @@ Her hører også **afvisninger**: et fund der ikke bliver en opgave, skal have s
 
 | Dato | Nr. | Beslutning | Begrundelse | Rolle |
 |---|---|---|---|---|
+| 2026-11-11 | task-0008 | Afvist før den blev bygget; menuens nuværende udseende beholdes | Menneskets valg: afvigelserne fra skærmbillederne er fine | architect |
+| 2026-11-11 | task-0008 | Menuens farver og detaljer rettes til skærmbillederne | Set i browseren: grøn i stedet for skifergrå, lysere orange, grå baggrund, venstrestillet tekst nederst, Admin uden rund knap i den smalle udgave, ingen luft til indholdet | architect |
+| 2026-11-11 | task-0007 | Små regler godkendt: nedtonede punkter henter ikke tal; skjult overpunkt skjuler underpunkterne; underpunkter kan have underpunkter | Developers valg; ingen grund til andet | architect |
+| 2026-11-11 | task-0007 | Hjælpeteksterne på knapperne er på dansk | Som menuens øvrige tekster fra skærmbillederne | architect |
+| 2026-11-11 | task-0007 | Korte navne uden `short=` er titlens første fire tegn | Developers valg; passer til den smalle udgave | architect |
+| 2026-11-11 | task-0007 | HTML-filer direkte fra `public/` får menuen uden mulighed for at fravælge den | Siden kan registreres med `addPath(..., menu=False)` når den skal være uden; partials uden `<body>` røres ikke | architect |
+| 2026-11-11 | task-0007 | Menuens stylesheet linkes af serveren, og et lille inline-script klapper menuen sammen før første tegning | Ellers blinker menuen ved hvert sideskift. Med en strengere CSP blinker den åben; det accepteres | architect |
+| 2026-11-11 | task-0007 | Uden login sendes `hj:ready` ikke; egen navigation bruger `DOMContentLoaded` dér, som `menu.md` siger | `hjMenu` er sat før `DOMContentLoaded`; at ændre `auth.js` var uden for opgaven | architect |
+| 2026-11-11 | task-0007 | På en offentlig side uden bruger viser menuen kun punkter for offentlige sider | Punkter brugeren ikke kan åbne uden login, skjules som andre punkter man ikke må åbne | architect |
+| 2026-11-11 | task-0007 | Opgaven er afsluttet: bygget | 92 HTTP-tjek holdt; architect så menuen i browseren: underpunkter, aktivt punkt, tal, Admin-knap, "Logget ind som", sammenklapning der huskes. Udseendet afviger fra skærmbillederne; det er task-0008 | architect |
 | 2026-11-11 | task-0006 | Fundet om at `.env` nævner `docs/` bliver ikke en opgave; mennesket retter selv sin `.env` | `.env` er menneskets og må ikke læses af rollerne. Linjerne er de `MS_*`-pladsholdere med en henvisning til `docs/SignInForm.md`, som blev tilføjet før skiftet til Authentik | architect |
 | 2026-11-11 | — | Tavlen gendannet i `docs/` ved siden af `guide/` | task-0006 har adskilt dokumentationen fra arbejdsfilerne | architect |
 | 2026-11-11 | task-0006 | Opgaven er afsluttet: bygget | Alle kriterier holder. Linktjek: 57 links, 0 brudte, efter at architect rettede README-linkene | architect |
