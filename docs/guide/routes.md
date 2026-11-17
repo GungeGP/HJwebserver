@@ -97,7 +97,6 @@ runs. Change the limit with `app.max_body_bytes = ...` before `start()`.
 |-------|---------|
 | `GET /js/webserver.js` | Framework script injected into every HTML page |
 | `GET /js/auth.js` | Who is logged in, and the form token on changing calls (only when auth is on) |
-| `GET /css/auth.css` | Styling from the old login form; no longer loaded by `auth.js` |
 | `GET /js/TableViewer.js` | TableViewer script (only once `addTableViewer()` is used) |
 | `GET /css/TableViewer.css` | TableViewer styling (loaded by TableViewer.js itself) |
 | `GET /api/verify` | The current user, `roleHierarchy` and the form token, or `401` (only when auth is on) |

@@ -12,11 +12,11 @@ columns as attributes (``row.Username``) regardless of the backend.
 
 This is a package, split by concern:
   * ``core``        - connection handling, execute/fetch primitives, schema/migrations
-  * ``auth``        - Users, Sessions, LoginAttempts, AuditLog queries (used by WebServer.auth)
+  * ``auth``        - AuditLog queries (used by WebServer.auth and app.getAuditLog)
   * ``tableviewer`` - generic table introspection backing WebServer.addTableViewer
 
 Everything below is re-exported here so existing code can keep doing
-``from WebServer.database import get_user_by_username`` etc. without caring
+``from WebServer.database import get_audit_log`` etc. without caring
 which submodule actually defines it.
 """
 
@@ -34,35 +34,8 @@ from WebServer.database.core import (
 )
 
 from WebServer.database.auth import (
-    get_user_by_username,
-    get_all_users,
-    create_user,
-    update_user_password,
-    set_user_role,
-    set_user_disabled,
-    delete_user,
-    get_user_by_external_id,
-    create_sso_user,
-    set_sso_profile,
-    set_role_pinned,
-    get_sso_users_with_sessions,
-    delete_audit_before,
-    create_session,
-    get_session,
-    touch_session,
-    delete_other_sessions,
-    delete_session,
-    delete_sessions_for_user,
-    delete_expired_sessions,
-    get_sessions_for_user,
-    get_login_attempt,
-    save_login_attempt,
-    delete_login_attempt,
-    delete_login_attempts_by_user,
-    delete_all_login_attempts,
-    get_locked_attempts,
-    delete_stale_login_attempts,
     insert_audit,
+    delete_audit_before,
     get_audit_log,
 )
 

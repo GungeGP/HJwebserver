@@ -51,6 +51,12 @@ Authentik groups that give a role (`GROUP_ADMIN`, `GROUP_DEV`, ...). They are
 your app's, not the framework's. `.env` is read when `WebServer(...)` is
 created, so `os.environ` works in `main.py` from that line on, before `settings()`.
 
+The file is looked for next to the script you start (`main.py`), also when the
+framework is installed as a package somewhere else. Without one there, the
+`.env` in the folder the app is started from (or a folder above it) is used. A
+key that is already set in the environment keeps its value; `.env` doesn't
+overwrite it.
+
 ### 2. The app
 
 ```python
@@ -298,15 +304,26 @@ styles (teammates' pages commonly use both), and forbids framing. Loading
 anything over plain `http://` from another host is blocked. To change it:
 
 ```python
-app.settings(auth=True, csp="default-src 'self'; frame-ancestors 'none'")   # stricter
-app.settings(auth=True, csp=None)                                           # no CSP header
+app.settings(auth=True, csp="default-src 'self'")   # stricter; frame-ancestors 'none' is added
+app.settings(auth=True, csp=None)                    # only Content-Security-Policy: frame-ancestors 'none'
 ```
 
-A handler that sets one of these headers itself wins over the default. The
-bare `403` for a request without the proxy's secret always carries
-`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`,
-whatever `csp` and `securityHeaders` say. Keep `frame-ancestors 'none'` in your
-own `csp`, so the app's pages can't be shown in a frame either.
+A handler that sets one of these headers itself wins over the default.
+
+**Behind Authentik the ban on framing can't be turned off.** With `auth=True`
+every response — pages, files, API answers, the bare `403` — carries
+`X-Frame-Options: DENY` and a CSP with `frame-ancestors 'none'`, whatever
+`csp` and `securityHeaders` say:
+
+| Setting | `Content-Security-Policy` sent |
+|---------|--------------------------------|
+| default `csp` | the default policy (it already has `frame-ancestors 'none'`) |
+| your own `csp` | your policy, with `frame-ancestors 'none'` added — or in place of a `frame-ancestors` that allows framing |
+| `csp=None` or `securityHeaders=False` | `frame-ancestors 'none'` |
+
+`securityHeaders=False` still drops the other headers. A CSP a handler sets
+itself gets the same treatment as your own `csp`. Without `auth=True` the
+headers are exactly what `csp` and `securityHeaders` say.
 
 ## Audit log
 

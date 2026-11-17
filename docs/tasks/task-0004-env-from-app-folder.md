@@ -1,7 +1,7 @@
 ---
 nummer: task-0004
 titel: Læs .env fra appens mappe
-status: planlagt
+status: afsluttet
 kilde: interview
 oprettet: 2026-11-11
 ---
@@ -52,5 +52,22 @@ task-0001
 developer, som aldrig retter i definitionen ovenfor.>
 
 ### Hvad er lavet
+- `WebServer/core/server.py`: ny funktion `_app_dotenv()`, som returnerer `.env` i mappen med `sys.argv[0]` hvis den findes, ellers `find_dotenv(usecwd=True)`, ellers `None`. `ServerMixin.__init__` kalder `load_dotenv` med den sti i stedet for `load_dotenv()` uden sti, og springer kaldet over når der ingen fil er. Det sker stadig først i `__init__`, så `os.environ` virker i `main.py` fra linjen efter `WebServer(...)`. `override` er ikke sat (standard `False`), så værdier i miljøet vinder.
+- `docs/guide/auth.md` (afsnittet om `.env`) og `docs/guide/webserver.md` (om `WebServer(...)`): siger hvor `.env` findes, og at nøgler i miljøet ikke overskrives.
+
+Holdt op mod *Færdig når*, efterprøvet med egne servere på SQLite i midlertidige mapper. Rammeværket var kopieret til en separat mappe og hentet via `PYTHONPATH`, som en installeret pakke (13 tjek, alle holdt):
+- **`.env` ved startfilen, rammeværket et andet sted:** `PROXY_SECRET`, `JWT_SECRET` og `GROUP_ADMIN` kommer fra filen. Kald med nøglen fra filen går igennem, gruppen fra filen giver admin, og `os.environ` i appen har værdierne lige efter `WebServer(...)`. Modprøve: samme opsætning med `server.py` fra `HEAD` finder ikke filen og stopper på `GROUP_ADMIN`.
+- **Ingen `.env` ved startfilen:** `.env` i den mappe appen startes fra, bliver brugt. Findes begge, vinder den ved startfilen.
+- **Miljøet vinder:** `GROUP_ADMIN` og en egen nøgle sat i miljøet beholder deres værdi; filens værdi bruges ikke.
+- **Rammeværket i projektmappen som i dag**, med eksemplet fra task-0001 (`authentikRoles` og `devUser` fra `os.environ["GROUP_ADMIN"]`): appen starter, og testbrugeren er admin.
+- **Kommandolinjen:** `python -m WebServer --app app:app audit` kørt fra appens mappe finder appens `.env`. Her er `sys.argv[0]` pakkens `__main__.py`, så det er arbejdsmappen der bruges.
+- task-0002's og task-0003's tjek kørt igen bagefter; alle holdt.
+
+Ingen nye kommandoer eller indstillinger.
+
 ### Hvad er ikke lavet, og hvorfor
+intet
+
 ### Uklart
+- `find_dotenv(usecwd=True)` leder også i mapperne over arbejdsmappen, ikke kun i den. Det følger opgavens "Sådan bygger vi det"; kriteriet siger kun "den mappe appen startes fra". Dokumentationen nævner det.
+- Ændret adfærd i ét tilfælde: lå `.env` før kun i en mappe over *rammeværket* (fx projektroden) mens appen startes et helt andet sted fra, blev den fundet før og bliver det ikke nu. Det er netop meningen med opgaven, men en udrulning der har levet af det, mister sine nøgler.

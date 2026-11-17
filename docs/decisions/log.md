@@ -10,6 +10,16 @@ Her hører også **afvisninger**: et fund der ikke bliver en opgave, skal have s
 
 | Dato | Nr. | Beslutning | Begrundelse | Rolle |
 |---|---|---|---|---|
+| 2026-11-11 | task-0005 | Kommentarerne i eksempelappen er på engelsk, som resten af filen | Resten af `main.py` er engelsk; det godkendte eksempel gjaldt koden, ikke kommentarernes sprog | architect |
+| 2026-11-11 | task-0004 | `.env` søges også i mapperne over arbejdsmappen; en `.env` der kun lå over rammeværkets egen mappe, findes ikke længere | Appens mappe er det rigtige sted; den gamle opførsel var en tilfældighed | architect |
+| 2026-11-11 | task-0003 | De fjernede databasefunktioner kan bryde en app der importerede dem | Godtaget; de hørte til det gamle login, og udgivelsen er allerede et brud-nummer | architect |
+| 2026-11-11 | task-0002 | En apps `frame-ancestors 'self'` erstattes af `'none'`; en handlers egen `X-Frame-Options` vinder stadig, men CSP'en forbyder rammen | Kontraktens krav om forbud på hvert svar er opfyldt gennem CSP'en; opgaven sagde at handlerens header vinder | architect |
+| 2026-11-11 | task-0009 | Forældede beskrivelser, død kode i TableViewer.js, aliaset `check_auth` og versionsstyret `HJwebserver.egg-info` ryddes i én opgave | Fund 1–5 i developers retur fra task-0002–0005 | architect |
+| 2026-11-11 | — | Developers egne fejltrin (en staget sletning, LF i requirements.txt, en hængende proces) bliver ikke en opgave | Developer har selv rettet dem; arbejdstræet er efterprøvet | architect |
+| 2026-11-11 | task-0005 | Opgaven er afsluttet: bygget | `main.py` starter i udviklingstilstand som admin uden proxy; `GROUP_ADMIN` i `.env.example`; 22 tjek på SQLite | architect |
+| 2026-11-11 | task-0004 | Opgaven er afsluttet: bygget | `.env` findes ved appens startfil, ellers i startmappen; miljøet vinder; 13 tjek | architect |
+| 2026-11-11 | task-0003 | Opgaven er afsluttet: bygget | PyJWT, `auth.css`, sidemærket og ubrugte databasefunktioner væk; `CLAUDE.md` passer. Architect: ingen `jwt`-import tilbage, koden kompilerer; 29 tjek | architect |
+| 2026-11-11 | task-0002 | Opgaven er afsluttet: bygget | Med `auth=True` forbyder hvert svar rammer, også med sikkerhedsheaderne slået fra eller egen CSP; 339 tjek | architect |
 | 2026-11-11 | task-0008 | Afvist før den blev bygget; menuens nuværende udseende beholdes | Menneskets valg: afvigelserne fra skærmbillederne er fine | architect |
 | 2026-11-11 | task-0008 | Menuens farver og detaljer rettes til skærmbillederne | Set i browseren: grøn i stedet for skifergrå, lysere orange, grå baggrund, venstrestillet tekst nederst, Admin uden rund knap i den smalle udgave, ingen luft til indholdet | architect |
 | 2026-11-11 | task-0007 | Små regler godkendt: nedtonede punkter henter ikke tal; skjult overpunkt skjuler underpunkterne; underpunkter kan have underpunkter | Developers valg; ingen grund til andet | architect |

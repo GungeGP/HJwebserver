@@ -39,8 +39,6 @@ def handle_file_request(self, url_path, file_path, public=False, roles=None, men
 
     automatic_handler._hj_public = bool(public)
     automatic_handler._hj_roles = list(roles) if roles else None
-    # An HTML page may be shown behind the login form (see WebHandler._authorize).
-    automatic_handler._hj_page = mimetypes.guess_type(absolute_path)[0] == 'text/html'
 
     if 'GET' not in self.routes:
         self.routes['GET'] = {}

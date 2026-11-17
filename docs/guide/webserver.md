@@ -21,8 +21,9 @@ you typically call them.
 
 On startup it prints which folder (if any) is used for static files.
 
-It also reads `.env`, so `os.environ` holds your keys from the next line on —
-before `settings()`:
+It also reads `.env` — next to your script, else in the folder the app is
+started from — so `os.environ` holds your keys from the next line on, before
+`settings()`. Keys already in the environment are not overwritten:
 
 ```python
 import os
@@ -122,8 +123,8 @@ app.settings(auth=True,
 | `auditLog` | `True` | Write logouts, refused access and refused form tokens to the `AuditLog` table. |
 | `auditRetentionDays` | `None` | Delete audit log rows older than this, at start. `None` = keep forever. |
 | `trustProxy` | `False` | Take the client IP from `X-Forwarded-For`. Set it behind the proxy. |
-| `csp` | a default policy | `Content-Security-Policy` header value. `None` sends none. See [Authentication → Security headers](auth.md#security-headers). |
-| `securityHeaders` | `True` | Send `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, CSP (and HSTS on HTTPS). |
+| `csp` | a default policy | `Content-Security-Policy` header value. `None` sends none. With `auth=True` `frame-ancestors 'none'` is always in it. See [Authentication → Security headers](auth.md#security-headers). |
+| `securityHeaders` | `True` | Send `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, CSP (and HSTS on HTTPS). With `auth=True` the ban on framing is sent even when `False`. |
 
 Calling `settings()` without `auth=True` (or not at all) leaves the server fully open.
 

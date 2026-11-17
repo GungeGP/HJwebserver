@@ -30,7 +30,7 @@ class AssetsMixin:
         static_dir/js/auth.js wins over the package's copy).
 
         gate: optional no-arg callable; a falsy result serves 404 (used so
-              auth.js/auth.css 404 when auth isn't enabled).
+              auth.js 404s when auth isn't enabled).
         extra_relative_fallback: a second relative path tried after the
               primary one, both locally and in the package (webserver.js
               falls back to a consumer's own js/default.js).
@@ -119,7 +119,7 @@ class AssetsMixin:
     def _register_asset_alias_routes(self):
         get_routes = self.routes.setdefault('GET', {})
         for url_path in ('/js/auth.js', '/js/webserver.js', '/js/TableViewer.js', '/js/Dialog.js',
-                          '/js/calender.js', '/css/TableViewer.css', '/css/auth.css', '/css/Dialog.css',
+                          '/js/calender.js', '/css/TableViewer.css', '/css/Dialog.css',
                           '/css/calender.css', '/js/menu.js', '/css/menu.css'):
             if url_path in get_routes:
                 get_routes[f'/public{url_path}'] = get_routes[url_path]

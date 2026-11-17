@@ -10,7 +10,7 @@ import ssl
 import sys
 import threading
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from WebServer.WebHandler import REQUEST_TIMEOUT, WebHandler
 from WebServer.database import createConnection, get_connection, create_tables
@@ -26,6 +26,40 @@ DEFAULT_CSP = (
     "base-uri 'self'; "
     "form-action 'self'"
 )
+
+FRAME_BAN = "frame-ancestors 'none'"
+
+
+def with_frame_ban(csp):
+    """``csp`` with frame-ancestors 'none', for apps behind Authentik.
+
+    Added when the policy has no frame-ancestors, and put in place of one that
+    allows framing (browsers only read the first). The rest of the policy is
+    kept as it is; no policy at all gives just the ban.
+    """
+    directives = [d.strip() for d in (csp or "").split(";") if d.strip()]
+    names = [d.split(None, 1)[0].lower() for d in directives]
+    if "frame-ancestors" not in names:
+        return "; ".join(directives + [FRAME_BAN])
+    i = names.index("frame-ancestors")
+    if [s.lower() for s in directives[i].split()[1:]] == ["'none'"]:
+        return csp
+    directives[i] = FRAME_BAN
+    return "; ".join(directives)
+
+
+def _app_dotenv():
+    """The app's .env, not the framework's: the one next to the app's start
+    file, else the one in the folder the app is started from (or a folder
+    above it). None when there is none.
+    """
+    try:
+        candidate = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), '.env')
+        if os.path.isfile(candidate):
+            return candidate
+    except Exception:
+        pass
+    return find_dotenv(usecwd=True) or None
 
 
 class _ThreadedServer(ThreadingHTTPServer):
@@ -73,7 +107,10 @@ class ServerMixin:
 
     def __init__(self, host="127.0.0.1", port=8000, static_dir: str = None, threaded=True):
         # .env first, so main.py can read its own keys with os.environ before settings().
-        load_dotenv()
+        # Values already in the environment win over the file.
+        dotenv_path = _app_dotenv()
+        if dotenv_path:
+            load_dotenv(dotenv_path)
         self.host = host
         self.port = port
         self.threaded = bool(threaded)
@@ -153,7 +190,6 @@ class ServerMixin:
                                     extra_relative_fallback='js/default.js')
         self._register_asset_route('/js/TableViewer.js', 'js/TableViewer.js', 'application/javascript')
         self._register_asset_route('/css/TableViewer.css', 'css/TableViewer.css', 'text/css')
-        self._register_asset_route('/css/auth.css', 'css/auth.css', 'text/css')
         self._register_asset_route('/js/Dialog.js', 'js/Dialog.js', 'application/javascript')
         self._register_asset_route('/css/Dialog.css', 'css/Dialog.css', 'text/css')
         self._register_asset_route('/js/calender.js', 'js/calender.js', 'application/javascript')
@@ -174,21 +210,29 @@ class ServerMixin:
         return decorator
 
     def _security_headers(self, request):
-        """Headers added to every response unless the handler already set them."""
-        if not self.security_headers_enabled:
-            return {}
-        headers = {
-            "X-Content-Type-Options": "nosniff",
-            "X-Frame-Options": "DENY",
-            "Referrer-Policy": "same-origin",
-        }
-        if self.csp:
-            headers["Content-Security-Policy"] = self.csp
-        if self.certfile:
-            headers["Strict-Transport-Security"] = "max-age=31536000"
-        if getattr(request, 'user', None):
-            # Authenticated responses must not end up in shared/disk caches.
-            headers["Cache-Control"] = "no-store"
+        """Headers added to every response unless the handler already set them.
+
+        Behind Authentik (auth=True) every response forbids framing, whatever
+        securityHeaders and csp say. A CSP the handler sets itself gets the
+        same ban in WebHandler.send_header.
+        """
+        headers = {}
+        if self.security_headers_enabled:
+            headers = {
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+                "Referrer-Policy": "same-origin",
+            }
+            if self.csp:
+                headers["Content-Security-Policy"] = self.csp
+            if self.certfile:
+                headers["Strict-Transport-Security"] = "max-age=31536000"
+            if getattr(request, 'user', None):
+                # Authenticated responses must not end up in shared/disk caches.
+                headers["Cache-Control"] = "no-store"
+        if self.auth:
+            headers["X-Frame-Options"] = "DENY"
+            headers["Content-Security-Policy"] = with_frame_ban(headers.get("Content-Security-Policy"))
         return headers
 
     def useHttps(self, certfile, keyfile):

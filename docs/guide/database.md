@@ -115,13 +115,3 @@ finally:
 
 Note that at this level the placeholder style is the driver's own (`?` for
 sqlite/mssql, `%s` for mysql) and rows are plain tuples.
-
-## Built-in queries
-
-Used by the framework itself, but you can call them:
-
-| Function | Purpose |
-|----------|---------|
-| `get_user_by_username(username)` | row with `Username`, `PasswordHash`, or `None` |
-| `create_user(username, password_hash)` | inserts a row in `Users` (no longer used for login) |
-| `update_user_password(username, password_hash)` | updates a row in `Users` (no longer used for login) |

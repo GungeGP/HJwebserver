@@ -34,6 +34,10 @@ class WebHandler(BaseHTTPRequestHandler):
         super().send_response(code, message)
 
     def send_header(self, keyword, value):
+        if keyword.lower() == 'content-security-policy' and getattr(self.server, 'auth', None):
+            # Behind Authentik a handler's own CSP keeps its rules but never allows framing.
+            from WebServer.core.server import with_frame_ban
+            value = with_frame_ban(value)
         self._sent_headers.add(keyword.lower())
         super().send_header(keyword, value)
 

@@ -21,10 +21,7 @@ en rapport der har stået her i dagevis, er et fund på vej til at blive glemt.>
 
 | Nr. | Titel | Status | Kilde |
 |---|---|---|---|
-| task-0002 | Rammeforbud på alle svar bag Authentik | planlagt | interview |
-| task-0003 | Fjern resterne af det gamle login | planlagt | interview |
-| task-0004 | Læs .env fra appens mappe | planlagt | interview |
-| task-0005 | Eksempelappen starter i udviklingstilstand | planlagt | interview |
+| task-0009 | Ryd de sidste rester af det gamle login og den forældede pakkeinfo | planlagt | interview |
 
 <`Status` er `planlagt`, `i-gang` eller `afsluttet`. `Kilde` er `interview`
 eller nummeret på den rapport opgaven kom af.>
@@ -33,6 +30,7 @@ eller nummeret på den rapport opgaven kom af.>
 
 | Emne |
 |---|
+| Udgiv version 0.2.0: login via Authentik og sidemenu, med brud på det gamle login |
 | Flyt forretningsspecifikke værdier — databasenavn, tabel- og kolonnenavne, maildomæne — ud af eksempelappen og dokumentationen |
 | Lav en testsuite i projektet, startende med de midlertidige test af login og samtidighed |
 | Afklar om databaseadgang og logning skal følge organisationens præferencer eller stå som afvigelse |
@@ -51,6 +49,10 @@ ellers fyldes `docs/tasks/` med halve idéer.>
 | task-0006 | Rammeværkets dokumentation i sin egen mappe | bygget |
 | task-0007 | Sidemenu som app-udvikleren slår til i main.py | bygget |
 | task-0008 | Menuens udseende som skærmbillederne | afvist |
+| task-0002 | Rammeforbud på alle svar bag Authentik | bygget |
+| task-0003 | Fjern resterne af det gamle login | bygget |
+| task-0004 | Læs .env fra appens mappe | bygget |
+| task-0005 | Eksempelappen starter i udviklingstilstand | bygget |
 
 <`Udfald` er `bygget` eller `afvist`. Flyt hertil når architect har vurderet
 opgaven — ikke når udrulningen er sket; udrulning er ikke en status.

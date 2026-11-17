@@ -7,22 +7,26 @@ from WebServer import WebServer
 from WebServer.helper import send_json
 from WebServer.tableviewer import selectFilter
 
-# Behind Authentik: the proxy reaches the app over the network, so it listens on all interfaces.
-app = WebServer(host="0.0.0.0", port=8080)   # reads .env, so os.environ works from here on
+# Local development: listens on this machine only (127.0.0.1). Reads .env, so os.environ works from here on.
+app = WebServer(port=8080)
+# In production behind Authentik the proxy reaches the app over the network, so it listens on all interfaces:
+# app = WebServer(host="0.0.0.0", port=8080)
 # type can be "sqlite", "mssql" or "mysql". Tables are created if missing (pass createTables=False to skip).
 app.setDatabase(type="mssql", server="localhost", dbName="Forsorg")  # Windows login; add user=/password= for a SQL Server login
 # app.setDatabase(type="sqlite", dbName="workTime.db")
 # app.setDatabase(type="mysql", server="localhost", dbName="workTime", user="root", password="secret")
 app.addPath('/', 'public/index.html')
 app.addPath('/cal', 'public/cal.html')
-# Every route/page now requires a user from Authentik unless registered with public=True.
-# Needs PROXY_SECRET and JWT_SECRET in .env, and this app's own GROUP_ADMIN: the
-# Authentik group whose members are admins. Everyone else Authentik lets in is "user".
+# Every route/page requires a user from Authentik unless registered with public=True.
+# Needs JWT_SECRET in .env, and this app's own GROUP_ADMIN: the Authentik group whose
+# members are admins. Everyone else Authentik lets in is "user".
+# devUser: development mode without proxy and Authentik - every request is the user
+# "test" in GROUP_ADMIN, so you are admin. Only allowed while listening on this machine.
 app.settings(auth=True,
              roleHierarchy=["admin", "user"],
-             authentikRoles={os.environ["GROUP_ADMIN"]: "admin"})
-# Local development without Authentik: WebServer(port=8080) instead (listens on 127.0.0.1 only),
-# and add  devUser={"username": "test", "groups": [os.environ["GROUP_ADMIN"]]}  to settings().
+             authentikRoles={os.environ["GROUP_ADMIN"]: "admin"},
+             devUser={"username": "test", "groups": [os.environ["GROUP_ADMIN"]]})
+# In production: remove devUser, and use host="0.0.0.0" above. PROXY_SECRET must then be in .env too.
 
 def valid_cpr(cpr):
     """ddmmyy-xxxx where ddmmyy is a real date."""
