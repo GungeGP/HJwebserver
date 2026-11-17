@@ -298,10 +298,6 @@ def resolve_user(request):
     return _user(username, _header(request, "X-authentik-name"), _header(request, "X-authentik-email"), groups)
 
 
-# Backwards-compatible name used by WebServer.checkAuth.
-check_auth = resolve_user
-
-
 # ---------------------------------------------------------------------------
 # Form token
 # ---------------------------------------------------------------------------

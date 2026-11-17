@@ -10,6 +10,11 @@ Her hører også **afvisninger**: et fund der ikke bliver en opgave, skal have s
 
 | Dato | Nr. | Beslutning | Begrundelse | Rolle |
 |---|---|---|---|---|
+| 2026-11-17 | — | Versionen sat til 0.2.0 i `setup.py` | Brud-leddet før 1.0: appens eget login er fjernet, så apps der brugte det, holder op med at virke. Med: login via Authentik, sidemenu, rammeforbud, `.env` fra appens mappe. Menneskets ja | architect |
+| 2026-11-17 | task-0009 | En gammel `users.cpython-314.pyc` på disken bliver ikke en opgave | Ikke versionsstyret, indlæses ikke uden kildefilen, gør intet | architect |
+| 2026-11-17 | task-0009 | Kommentaren "Microsoft login: ExternalId ..." i migreringerne bliver stående | Den forklarer hvorfor kolonnen findes; kolonnen og migreringen er stadig rigtige. For lille til en opgave | architect |
+| 2026-11-17 | task-0009 | Opgaven er afsluttet: bygget | Beskrivelser, tjekket for adgangskodeskift og `check_auth` væk; `HJwebserver.egg-info` ude af git. 25 HTTP-tjek; architect: ingen rester tilbage, koden kompilerer | architect |
+| 2026-11-17 | — | `GROUP_ADMIN` lagt tom nederst i menneskets `.env` | Menneskets ønske; tom er nok i udviklingstilstand. `.env` kunne ikke læses, så en tidligere linje med samme nøgle er ikke tjekket | architect |
 | 2026-11-11 | task-0005 | Kommentarerne i eksempelappen er på engelsk, som resten af filen | Resten af `main.py` er engelsk; det godkendte eksempel gjaldt koden, ikke kommentarernes sprog | architect |
 | 2026-11-11 | task-0004 | `.env` søges også i mapperne over arbejdsmappen; en `.env` der kun lå over rammeværkets egen mappe, findes ikke længere | Appens mappe er det rigtige sted; den gamle opførsel var en tilfældighed | architect |
 | 2026-11-11 | task-0003 | De fjernede databasefunktioner kan bryde en app der importerede dem | Godtaget; de hørte til det gamle login, og udgivelsen er allerede et brud-nummer | architect |

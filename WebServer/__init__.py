@@ -23,7 +23,7 @@ class WebServer(ServerMixin, FileHandlerMixin, AssetsMixin, AuthMixin, TableView
       ServerMixin       (core/server.py)      - construction, routing, TLS, start()
       FileHandlerMixin   (core/filehandler.py) - addPath()
       AssetsMixin        (core/assets.py)      - the framework's own bundled js/css assets
-      AuthMixin          (core/auth.py)        - settings(auth=...), user/session/audit management
+      AuthMixin          (core/auth.py)        - settings(auth=...), checkAuth(), audit
       TableViewerMixin   (core/tableviewer.py) - addTableViewer()
       MenuMixin          (core/menu.py)        - menu()
     """

@@ -188,11 +188,10 @@ class TableViewer {
             const res = await fetch(`${this.url}${separator}${params}`);
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
-                // Not logged in (or a password change is pending): auth.js is
-                // showing its form, and the page reloads after login. Keep the
-                // placeholder rows (or the rows already shown) underneath it
-                // rather than an error message.
-                if (res.status === 401 || data.error === 'password_change_required') return this;
+                // Not logged in: auth.js reloads the page so Authentik can
+                // show its login. Keep the placeholder rows (or the rows
+                // already shown) until then rather than an error message.
+                if (res.status === 401) return this;
                 throw new Error(data.error || `HTTP ${res.status}`);
             }
             const data = await res.json();
@@ -281,7 +280,7 @@ class TableViewer {
         for (let r = 1; r < Math.max(1, Math.min(this.limit, fits)); r++) addRow(r);
 
         // Measured before the stylesheet applied? Redraw once it has - also
-        // when the skeleton stays up behind the login form after a 401.
+        // when the skeleton stays up after a 401.
         if (!_tvStylesLoaded) {
             _ensureTableViewerStyles().then(() => {
                 if (!this._hasRendered && !this.scrollEl.hidden) this._renderSkeleton();

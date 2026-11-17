@@ -66,7 +66,7 @@ def inject_js_scripts(content, urls, public=False):
     Used to auto-load the framework's own js assets - see
     core/assets.py's get_inject_js_urls() for which urls these are.
     public=True marks the tags data-hj-page="public", which tells auth.js
-    never to show the login form on this page.
+    never to reload this page on a 401.
     """
     marker = ' data-hj-page="public"' if public else ''
     injections = [f'<script src="{url}"{marker}></script>'.encode('utf-8') for url in urls if url]

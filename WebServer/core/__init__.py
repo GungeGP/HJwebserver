@@ -3,7 +3,7 @@
   * server.py       - construction, routing, TLS, database wiring, start()
   * filehandler.py  - addPath() (pairs with WebServer.FileHandler)
   * assets.py       - the framework's own bundled js/css assets
-  * auth.py         - settings(auth=...) and user/session/audit management
+  * auth.py         - settings(auth=...), checkAuth() and audit
   * tableviewer.py  - addTableViewer() (pairs with WebServer.database.tableviewer)
   * menu.py         - menu() (pairs with WebServer.menu)
 
